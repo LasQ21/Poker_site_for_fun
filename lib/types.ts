@@ -16,6 +16,7 @@ export interface GameDTO {
   levelStartedAt: string | null;
   pausedRemainingMs: number | null;
   reminderIntervalMin: number | null;
+  joinCode: string | null;
   createdAt: string;
   finishedAt: string | null;
 }

@@ -16,6 +16,7 @@ const isGroup = (ctx: Context) => ctx.chat?.type === "group" || ctx.chat?.type =
 
 export const PRIVATE_COMMANDS: BotCommand[] = [
   { command: "start", description: "Відкрити покер-трекер" },
+  { command: "join", description: "Приєднатися за кодом: /join 1234" },
   { command: "newgame", description: "Створити гру" },
   { command: "history", description: "Мої останні ігри" },
   { command: "help", description: "Довідка" },
@@ -23,7 +24,7 @@ export const PRIVATE_COMMANDS: BotCommand[] = [
 
 export const GROUP_COMMANDS: BotCommand[] = [
   { command: "newgame", description: "Нова гра (кеш або турнір)" },
-  { command: "join", description: "Сісти за стіл в активній грі" },
+  { command: "join", description: "Сісти за стіл: /join або /join 1234" },
   { command: "stack", description: "Оновити свій стек: /stack 12500" },
   { command: "rebuy", description: "Ребай (можна вказати суму)" },
   { command: "out", description: "Вибув (турнір)" },
@@ -39,7 +40,7 @@ const HELP = `<b>Покер-трекер</b> — облік стеків у до
 
 <b>У групі:</b>
 /newgame — створити гру (кеш чи турнір)
-/join — сісти за стіл
+/join — сісти за стіл (або /join 1234 — за кодом гри, працює і в приваті)
 /stack 12500 — оновити свій стек
 /rebuy — ребай (або /rebuy 5000)
 /out — вибув із турніру
@@ -119,7 +120,11 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
       return;
     }
     const payload = typeof ctx.match === "string" ? ctx.match.trim() : "";
-    const url = payload ? `${appUrl()}/g/${encodeURIComponent(payload)}` : appUrl();
+    const url = /^\d{4}$/.test(payload)
+      ? `${appUrl()}/join/${payload}`
+      : payload
+        ? `${appUrl()}/g/${encodeURIComponent(payload)}`
+        : appUrl();
     await ctx.reply(
       ctx.message?.text?.startsWith("/help")
         ? HELP
@@ -157,19 +162,57 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     await ctx.answerCallbackQuery({ text: "Гру створено!" });
     await ctx.editMessageText(
       `🃏 <b>${escapeHtml(game.name)}</b> створено!\nХост: ${escapeHtml(user.firstName)} · стартовий стек ${fmtChips(game.startingStack)}\n\n` +
-        `Сідайте за стіл: /join або кнопка нижче. Хост може змінити стек, блайнди й нагадування в застосунку.`,
+        `Код гри: <b>${game.joinCode}</b>\nСідайте за стіл: /join (тут) або /join ${game.joinCode} (будь-де), чи кнопка нижче.`,
       { parse_mode: "HTML", reply_markup: gameButton(game.id) },
     );
   }));
 
-  bot.command("join", run(async (ctx) => {
-    const game = await requireActiveGame(ctx);
+  /** Seats the sender, or asks which pre-added seat is theirs when the host added names without Telegram. */
+  async function seatOrAsk(ctx: Context, game: Awaited<ReturnType<typeof G.getGame>>) {
     const user = await userFromCtx(ctx);
+    if (await G.playerForUser(game.id, user.id)) {
+      await ctx.reply(`Ви вже за столом у «${escapeHtml(game.name)}».`, { parse_mode: "HTML", reply_markup: gameButton(game.id) });
+      return;
+    }
+    const state = await G.loadGameState(game.id);
+    const free = state.players.filter((p) => p.userId == null);
+    if (free.length) {
+      const kb = new InlineKeyboard();
+      free.slice(0, 12).forEach((p, i) => {
+        kb.text(`Я — ${p.displayName}`, `seat:${game.id}:${p.id}`);
+        if (i % 2 === 1) kb.row();
+      });
+      kb.row().text("➕ Новим гравцем", `seat:${game.id}:new`);
+      await ctx.reply(`«${escapeHtml(game.name)}»: хост уже вписав кількох гравців. Хто ви?`, {
+        parse_mode: "HTML",
+        reply_markup: kb,
+      });
+      return;
+    }
     const p = await G.joinGame(game.id, user);
-    await ctx.reply(`✅ ${escapeHtml(p.displayName)} за столом зі стеком ${fmtChips(game.startingStack)}.`, {
+    await ctx.reply(`✅ ${escapeHtml(p.displayName)} за столом «${escapeHtml(game.name)}» зі стеком ${fmtChips(game.startingStack)}.`, {
       parse_mode: "HTML",
       reply_markup: gameButton(game.id),
     });
+  }
+
+  bot.command("join", run(async (ctx) => {
+    const arg = String(ctx.match ?? "").trim();
+    if (arg) {
+      if (!G.JOIN_CODE_RE.test(arg)) throw new AppError(400, "Код гри — це 4 цифри, напр.: /join 4821");
+      await seatOrAsk(ctx, await G.findActiveGameByCode(arg));
+      return;
+    }
+    if (!isGroup(ctx)) throw new AppError(400, "Напишіть код гри, який показує хост: /join 4821");
+    await seatOrAsk(ctx, await requireActiveGame(ctx));
+  }));
+
+  bot.callbackQuery(/^seat:([A-Za-z0-9_-]+):(new|\d+)$/, run(async (ctx) => {
+    const [, gameId, seat] = ctx.match!;
+    const user = await userFromCtx(ctx);
+    const p = await G.joinGame(gameId, user, seat === "new" ? undefined : Number(seat));
+    await ctx.answerCallbackQuery({ text: `Ви — ${p.displayName}` });
+    await ctx.editMessageText(`✅ ${escapeHtml(p.displayName)} за столом.`, { parse_mode: "HTML", reply_markup: gameButton(gameId) });
   }));
 
   bot.command("stack", run(async (ctx) => {
@@ -212,7 +255,8 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
   bot.command("standings", run(async (ctx) => {
     const game = await requireActiveGame(ctx);
     const state = await G.loadGameState(game.id);
-    await ctx.reply(`📊 <b>${escapeHtml(game.name)}</b>\n\n${G.standingsText(state)}`, {
+    const code = state.game.joinCode ? `\n\nКод гри: <b>${state.game.joinCode}</b>` : "";
+    await ctx.reply(`📊 <b>${escapeHtml(game.name)}</b>\n\n${G.standingsText(state)}${code}`, {
       parse_mode: "HTML",
       reply_markup: gameButton(game.id),
     });

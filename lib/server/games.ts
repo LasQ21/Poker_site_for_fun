@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { randomInt } from "node:crypto";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -28,7 +29,7 @@ import { fmtBuyins, fmtChips, fmtSigned } from "@/lib/format";
 import { miniAppLink } from "@/lib/config";
 import { scheduleJob } from "@/lib/qstash";
 import { escapeHtml, notifyChat, urlButton } from "@/lib/telegram/api";
-import { badRequest, forbidden, notFound } from "./errors";
+import { AppError, badRequest, forbidden, notFound } from "./errors";
 import { displayNameOf } from "./users";
 
 export type BuyinKind = "buyin" | "rebuy" | "addon";
@@ -52,6 +53,66 @@ export interface GameState {
 }
 
 export const newGameId = () => nanoid(10);
+
+// ---------------------------------------------------------------- join codes
+
+export const JOIN_CODE_RE = /^\d{4}$/;
+
+function isUniqueViolation(e: unknown): boolean {
+  const err = e as { code?: string; cause?: { code?: string } };
+  return err?.code === "23505" || err?.cause?.code === "23505";
+}
+
+/** Gives an active game a fresh 4-digit code (1000–9999) not used by any other active game. */
+export async function assignJoinCode(gameId: string): Promise<string> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const rows = await db
+      .select({ code: games.joinCode })
+      .from(games)
+      .where(and(eq(games.status, "active"), isNotNull(games.joinCode)));
+    const used = new Set(rows.map((r) => r.code));
+    if (used.size >= 8000) throw new AppError(503, "Забагато активних ігор, спробуйте пізніше");
+    let code: string;
+    do code = String(randomInt(1000, 10000));
+    while (used.has(code));
+    try {
+      await db.update(games).set({ joinCode: code }).where(eq(games.id, gameId));
+      return code;
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+    }
+  }
+  throw new AppError(503, "Не вдалося згенерувати код гри");
+}
+
+export async function findActiveGameByCode(code: string): Promise<Game> {
+  const c = code.trim();
+  if (!JOIN_CODE_RE.test(c)) throw badRequest("Код гри — це 4 цифри");
+  const [g] = await db
+    .select()
+    .from(games)
+    .where(and(eq(games.joinCode, c), eq(games.status, "active")))
+    .limit(1);
+  if (!g) throw notFound("Гру з таким кодом не знайдено (або її вже завершено)");
+  return g;
+}
+
+/**
+ * Join by code. Seats the user right away unless the host pre-added players without Telegram —
+ * then the client lets them pick their seat first.
+ */
+export async function joinByCode(actor: User, code: string) {
+  const game = await findActiveGameByCode(code);
+  if (await playerForUser(game.id, actor.id)) return { gameId: game.id, status: "already" as const };
+  const [free] = await db
+    .select({ id: players.id })
+    .from(players)
+    .where(and(eq(players.gameId, game.id), isNull(players.userId)))
+    .limit(1);
+  if (free) return { gameId: game.id, status: "choose-seat" as const };
+  await joinGame(game.id, actor);
+  return { gameId: game.id, status: "joined" as const };
+}
 
 // ---------------------------------------------------------------- loading
 
@@ -115,6 +176,7 @@ function toPlayerView(
 
 export async function loadGameState(gameId: string): Promise<GameState> {
   const game = await getGame(gameId);
+  if (game.status === "active" && !game.joinCode) game.joinCode = await assignJoinCode(game.id);
   const [hostRow] = await db.select().from(users).where(eq(users.id, game.hostUserId)).limit(1);
   const chatRow = game.chatId
     ? (await db.select().from(chats).where(eq(chats.id, game.chatId)).limit(1))[0]
@@ -221,6 +283,8 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
       reminderIntervalMin: input.reminderIntervalMin || null,
     })
     .returning();
+
+  game.joinCode = await assignJoinCode(game.id);
 
   if (input.hostPlays !== false) {
     await insertPlayer(game, displayNameOf(actor), actor.id, actor.id);
@@ -570,7 +634,11 @@ export async function reopenGame(gameId: string, actor: User) {
   const game = await getGame(gameId);
   assertHost(game, actor);
   if (game.status !== "finished") throw badRequest("Гра ще триває");
-  await db.update(games).set({ status: "active", finishedAt: null, updatedAt: new Date() }).where(eq(games.id, gameId));
+  await db
+    .update(games)
+    .set({ status: "active", finishedAt: null, joinCode: null, updatedAt: new Date() })
+    .where(eq(games.id, gameId));
+  await assignJoinCode(gameId);
   await db.update(players).set({ finalChips: null }).where(eq(players.gameId, gameId));
   if (game.type === "tournament") {
     await db

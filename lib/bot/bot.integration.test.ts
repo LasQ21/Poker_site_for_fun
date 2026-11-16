@@ -15,15 +15,17 @@ d("bot (integration)", () => {
   const CHAT = { id: -100777, type: "supergroup" as const, title: "Test group" };
   const HOST = { id: 9001, is_bot: false, first_name: "Хост" };
   const ANNA = { id: 9002, is_bot: false, first_name: "Анна" };
+  const IVAN = { id: 9003, is_bot: false, first_name: "Іван" };
+  const OLHA = { id: 9004, is_bot: false, first_name: "Ольга" };
   let updateId = 1;
   let messageId = 1;
 
-  const msg = (from: typeof HOST, text: string): Update => ({
+  const msg = (from: typeof HOST, text: string, chat: { id: number; type: "supergroup" | "private"; title?: string } = CHAT): Update => ({
     update_id: updateId++,
     message: {
       message_id: messageId++,
       date: Math.floor(Date.now() / 1000),
-      chat: CHAT,
+      chat: chat as never,
       from,
       text,
       entities: text.startsWith("/") ? [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] : undefined,
@@ -39,8 +41,8 @@ d("bot (integration)", () => {
     const { eq, inArray } = await import("drizzle-orm");
     await db.delete(chats).where(eq(chats.id, CHAT.id));
     const { games } = await import("@/lib/db/schema");
-    await db.delete(games).where(inArray(games.hostUserId, [HOST.id, ANNA.id]));
-    await db.delete(users).where(inArray(users.id, [HOST.id, ANNA.id]));
+    await db.delete(games).where(inArray(games.hostUserId, [HOST.id, ANNA.id, IVAN.id, OLHA.id]));
+    await db.delete(users).where(inArray(users.id, [HOST.id, ANNA.id, IVAN.id, OLHA.id]));
     const { createBot } = await import("./index");
     bot = createBot("123:test", {
       id: 1,
@@ -74,6 +76,41 @@ d("bot (integration)", () => {
       },
     });
     expect(lastText()).toContain("створено");
+    const code = lastText().match(/Код гри: <b>(\d{4})<\/b>/)?.[1];
+    expect(code).toMatch(/^\d{4}$/);
+
+    // Join by code from a private chat.
+    const dm = (u: typeof HOST) => ({ id: u.id, type: "private" as const });
+    await bot.handleUpdate(msg(IVAN, "/join 0000", dm(IVAN)));
+    expect(lastText()).toContain("не знайдено");
+    await bot.handleUpdate(msg(IVAN, `/join ${code}`, dm(IVAN)));
+    expect(lastText()).toContain("Іван за столом");
+
+    // Host pre-adds a seat without Telegram; Olha joins by code and claims it.
+    const G = await import("@/lib/server/games");
+    const { db } = await import("@/lib/db");
+    const { users } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const game = await G.findActiveGameByCode(code!);
+    const [hostUser] = await db.select().from(users).where(eq(users.id, HOST.id));
+    const seat = await G.addPlayer(game.id, hostUser, "Оля");
+    await bot.handleUpdate(msg(OLHA, `/join ${code}`, dm(OLHA)));
+    expect(lastText()).toContain("Хто ви?");
+    await bot.handleUpdate({
+      update_id: updateId++,
+      callback_query: {
+        id: "cb2",
+        from: OLHA,
+        chat_instance: "y",
+        data: `seat:${game.id}:${seat.id}`,
+        message: { message_id: 2, date: 0, chat: dm(OLHA) as never, text: "Хто ви?" },
+      },
+    });
+    expect(lastText()).toContain("Оля за столом");
+    expect((await G.playerForUser(game.id, OLHA.id))?.id).toBe(seat.id);
+    await G.removePlayer(game.id, seat.id, hostUser);
+    const ivan = await G.playerForUser(game.id, IVAN.id);
+    await G.removePlayer(game.id, ivan!.id, hostUser);
 
     await bot.handleUpdate(msg(ANNA, "/stack 5000"));
     expect(lastText()).toContain("/join");

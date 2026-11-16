@@ -78,7 +78,7 @@ export default function GamePage() {
 
   async function share() {
     setMenu(false);
-    const text = `Гра «${game.name}» — стеки онлайн`;
+    const text = game.joinCode ? `Сідай за стіл «${game.name}»: код ${game.joinCode}` : `Гра «${game.name}»`;
     if (isMiniApp()) {
       openExternal(`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(text)}`);
     } else if (navigator.share) {
@@ -114,6 +114,29 @@ export default function GamePage() {
           <IconMore />
         </button>
       </header>
+
+      {active && game.joinCode && (
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(game.joinCode!);
+              haptic("light");
+              toast(`Код ${game.joinCode} скопійовано`);
+            } catch {
+              share();
+            }
+          }}
+          className="glass mb-5 flex w-full items-center gap-4 rounded-[28px] px-4 py-3 text-left transition active:scale-[0.99]"
+          aria-label={`Код гри ${game.joinCode}, скопіювати`}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-bold text-fg/80">Код гри</span>
+            <span className="block text-[12px] font-medium text-hint">друзі вводять його на головній або пишуть боту /join {game.joinCode}</span>
+          </span>
+          <span className="font-display text-[1.9rem] font-bold leading-none tracking-[0.18em] tabular">{game.joinCode}</span>
+        </button>
+      )}
 
       {!active && (
         <Link href={`/g/${game.id}/summary`} className="glass-tint mb-5 flex items-center justify-between rounded-[28px] px-5 py-4 font-bold">

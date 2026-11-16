@@ -9,6 +9,7 @@ import { useMe } from "@/components/AppShell";
 import { ChipStack } from "@/components/ChipStack";
 import { GameList } from "@/components/GameList";
 import { IconChevron, IconPlus } from "@/components/icons";
+import { JoinByCode } from "@/components/JoinByCode";
 import { LoginPanel } from "@/components/LoginPanel";
 import { Empty, LinkButton, PageLoader, Section } from "@/components/ui";
 
@@ -61,6 +62,7 @@ export default function HomePage() {
               <IconChevron />
             </Link>
           )}
+          <JoinByCode />
           {active.length > 1 && (
             <Section title="Інші активні ігри">
               <GameList games={active.slice(1)} />

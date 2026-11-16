@@ -56,11 +56,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     applyTheme();
     wa.onEvent("themeChanged", applyTheme);
 
-    // Deep link: t.me/<bot>/<app>?startapp=<gameId> or lb_<chatPublicId>
+    // Deep link: t.me/<bot>/<app>?startapp=<gameId> | <4-digit join code> | lb_<chatPublicId>
     const sp = wa.initDataUnsafe.start_param;
     if (sp && !sessionStorage.getItem(`sp:${sp}`)) {
       sessionStorage.setItem(`sp:${sp}`, "1");
       if (sp.startsWith("lb_")) router.replace(`/leaderboard/${sp.slice(3)}`);
+      else if (/^\d{4}$/.test(sp)) router.replace(`/join/${sp}`);
       else if (/^[A-Za-z0-9_-]{4,40}$/.test(sp)) router.replace(`/g/${sp}`);
     }
     return () => wa.offEvent("themeChanged", applyTheme);

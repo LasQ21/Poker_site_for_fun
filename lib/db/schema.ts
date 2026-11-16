@@ -89,6 +89,8 @@ export const games = pgTable(
     timerVersion: integer("timer_version").notNull().default(0),
     reminderIntervalMin: integer("reminder_interval_min"),
     reminderVersion: integer("reminder_version").notNull().default(0),
+    /** 4-digit code to join the game; unique among active games, freed when the game ends. */
+    joinCode: text("join_code"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
     finishedAt: ts("finished_at"),
@@ -96,6 +98,9 @@ export const games = pgTable(
   (t) => [
     index("games_chat_idx").on(t.chatId, t.status),
     index("games_host_idx").on(t.hostUserId),
+    uniqueIndex("games_active_join_code_uq")
+      .on(t.joinCode)
+      .where(sql`${t.status} = 'active' and ${t.joinCode} is not null`),
   ],
 );
 

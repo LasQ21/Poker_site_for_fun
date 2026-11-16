@@ -1,0 +1,2 @@
+ALTER TABLE "games" ADD COLUMN "join_code" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "games_active_join_code_uq" ON "games" USING btree ("join_code") WHERE "games"."status" = 'active' and "games"."join_code" is not null;

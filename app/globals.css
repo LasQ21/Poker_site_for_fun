@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/*
+ * Colours follow the Telegram theme when running as a Mini App (telegram-web-app.js sets
+ * --tg-theme-* on <html>); on the website the fallbacks below apply, light or dark.
+ */
+:root {
+  --fb-bg: #ffffff;
+  --fb-secondary-bg: #f0f2f5;
+  --fb-section-bg: #ffffff;
+  --fb-text: #0f1419;
+  --fb-hint: #6b7480;
+  --fb-link: #1f7ad1;
+  --fb-button: #1f7ad1;
+  --fb-button-text: #ffffff;
+  --fb-accent: #1f7ad1;
+  --fb-destructive: #d63b3b;
+  --fb-separator: rgba(15, 20, 25, 0.08);
+  --positive: #16a34a;
+  --negative: #dc2626;
+  --felt: #0f6b46;
+  --felt-2: #0b5236;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fb-bg: #17212b;
+    --fb-secondary-bg: #0e1621;
+    --fb-section-bg: #17212b;
+    --fb-text: #f5f5f5;
+    --fb-hint: #8b98a5;
+    --fb-link: #6ab3f3;
+    --fb-button: #5288c1;
+    --fb-button-text: #ffffff;
+    --fb-accent: #6ab3f3;
+    --fb-destructive: #ec5b5b;
+    --fb-separator: rgba(255, 255, 255, 0.08);
+    --positive: #4ade80;
+    --negative: #f87171;
+    --felt: #14583c;
+    --felt-2: #0d3f2b;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --positive: #4ade80;
+  --negative: #f87171;
+  --fb-separator: rgba(255, 255, 255, 0.08);
+  --felt: #14583c;
+  --felt-2: #0d3f2b;
+  color-scheme: dark;
+}
+
+:root {
+  --app-bg: var(--tg-theme-secondary-bg-color, var(--fb-secondary-bg));
+  --app-section: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, var(--fb-section-bg)));
+  --app-text: var(--tg-theme-text-color, var(--fb-text));
+  --app-hint: var(--tg-theme-hint-color, var(--fb-hint));
+  --app-link: var(--tg-theme-link-color, var(--fb-link));
+  --app-button: var(--tg-theme-button-color, var(--fb-button));
+  --app-button-text: var(--tg-theme-button-text-color, var(--fb-button-text));
+  --app-accent: var(--tg-theme-accent-text-color, var(--fb-accent));
+  --app-destructive: var(--tg-theme-destructive-text-color, var(--fb-destructive));
+  --app-separator: var(--tg-theme-section-separator-color, var(--fb-separator));
+}
+
+@theme inline {
+  --color-bg: var(--app-bg);
+  --color-section: var(--app-section);
+  --color-fg: var(--app-text);
+  --color-hint: var(--app-hint);
+  --color-link: var(--app-link);
+  --color-button: var(--app-button);
+  --color-button-fg: var(--app-button-text);
+  --color-accent: var(--app-accent);
+  --color-danger: var(--app-destructive);
+  --color-sep: var(--app-separator);
+  --color-pos: var(--positive);
+  --color-neg: var(--negative);
+  --color-felt: var(--felt);
+  --color-felt-2: var(--felt-2);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body {
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-sheet {
+  animation: sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.animate-fade {
+  animation: fade-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet,
+  .animate-fade {
+    animation: none;
+  }
+}

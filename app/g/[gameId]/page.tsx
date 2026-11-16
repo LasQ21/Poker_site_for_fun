@@ -18,6 +18,7 @@ import { GameSettings } from "@/components/GameSettings";
 import { LoginPanel } from "@/components/LoginPanel";
 import { StackEditor } from "@/components/StackEditor";
 import { StackTable } from "@/components/StackTable";
+import { IconMore } from "@/components/icons";
 import { Badge, Button, Empty, inputCls, PageLoader, Row, Section, Sheet } from "@/components/ui";
 
 const StackChart = dynamic(() => import("@/components/StackChart"), { ssr: false, loading: () => <div className="h-[260px]" /> });
@@ -99,21 +100,23 @@ export default function GamePage() {
     <div>
       <header className="mb-3 flex items-start justify-between gap-3 px-1">
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-bold">{game.name}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-hint">
-            <Badge tone="accent">{game.type === "cash" ? "💵 Кеш" : "🏆 Турнір"}</Badge>
+          <h1 className="font-display truncate text-[1.6rem] font-bold leading-tight">{game.name}</h1>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[13px] font-medium text-hint">
+            <Badge tone="accent">{game.type === "cash" ? "Кеш" : "Турнір"}</Badge>
             {active ? <Badge tone="pos">триває</Badge> : <Badge>завершена</Badge>}
-            {state.chat && <span>· {state.chat.title}</span>}
-            <span>· хост {state.host.name}</span>
+            <span>
+              хост {state.host.name}
+              {state.chat ? `, ${state.chat.title}` : ""}
+            </span>
           </div>
         </div>
-        <button type="button" aria-label="Меню" onClick={() => setMenu(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-section text-xl">
-          ⋯
+        <button type="button" aria-label="Меню гри" onClick={() => setMenu(true)} className="glass grid h-11 w-11 shrink-0 place-items-center rounded-full">
+          <IconMore />
         </button>
       </header>
 
       {!active && (
-        <Link href={`/g/${game.id}/summary`} className="mb-4 flex items-center justify-between rounded-2xl bg-button px-4 py-3 font-semibold text-button-fg">
+        <Link href={`/g/${game.id}/summary`} className="glass-tint mb-5 flex items-center justify-between rounded-[28px] px-5 py-4 font-bold">
           🏁 Гру завершено — переглянути підсумок <span>›</span>
         </Link>
       )}
@@ -123,7 +126,7 @@ export default function GamePage() {
       {active && state.role === "viewer" && state.viewer && (
         <Section>
           <div className="p-4">
-            <div className="font-semibold">Ви граєте?</div>
+            <div className="font-display font-bold">Ви граєте?</div>
             <div className="mb-3 text-sm text-hint">Оберіть своє місце, щоб оновлювати власний стек.</div>
             <div className="flex flex-wrap gap-2">
               {freeSeats.map((p) => (
@@ -141,12 +144,12 @@ export default function GamePage() {
       {active && !state.viewer && !isMiniApp() && <LoginPanel compact />}
 
       <Section
-        title={`Гравці · ${state.players.length}`}
+        title={`Гравці (${state.players.length})`}
         action={
           state.check.diff !== 0 ? (
-            <span className="text-[13px] font-semibold text-neg">⚠️ {fmtSigned(state.check.diff)} фішок</span>
+            <span className="text-[13px] font-bold text-neg">⚠ {fmtSigned(state.check.diff)} фішок</span>
           ) : (
-            <span className="text-[13px] text-hint tabular">Σ {fmtChips(state.check.totalStacks)}</span>
+            <span className="text-[13px] font-semibold text-hint tabular">на столі {fmtChips(state.check.totalStacks)}</span>
           )
         }
       >
@@ -184,7 +187,7 @@ export default function GamePage() {
       <StackEditor state={state} player={selected} onClose={() => setSelectedId(null)} act={run} />
 
       <Sheet open={menu} onClose={() => setMenu(false)} title="Гра">
-        <div className="mb-3 overflow-hidden rounded-2xl bg-fg/4">
+        <div className="mb-3 overflow-hidden rounded-[24px] bg-fg/5">
           <Row onClick={share}>📤 Поділитися посиланням</Row>
           <Row href={`/g/${game.id}/summary`}>📊 Підсумок і результати</Row>
           <Row onClick={() => openExternal(`${window.location.origin}/api/games/${game.id}/export.csv`)}>⬇️ Експорт CSV</Row>

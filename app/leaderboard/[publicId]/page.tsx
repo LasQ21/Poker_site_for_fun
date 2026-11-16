@@ -47,8 +47,8 @@ export default function LeaderboardPage() {
 
   return (
     <div>
-      <h1 className="px-1 text-2xl font-bold">🏆 {data.chat.title}</h1>
-      <div className="mb-3 px-1 text-sm text-hint">
+      <h1 className="font-display px-1 text-[1.6rem] font-bold leading-tight">{data.chat.title}</h1>
+      <div className="mb-4 px-1 text-sm font-medium text-hint">
         {data.season ? `Сезон «${data.season.name}»` : "За весь час"} · {data.gamesCount.tournament} турнірів, {data.gamesCount.cash} кеш-ігор
       </div>
 
@@ -75,8 +75,8 @@ export default function LeaderboardPage() {
           value={currentTab}
           onChange={setTab}
           options={[
-            { value: "tournament", label: "Турніри · очки" },
-            { value: "cash", label: "Кеш · бай-іни" },
+            { value: "tournament", label: "Турніри" },
+            { value: "cash", label: "Кеш" },
           ]}
         />
       </div>
@@ -85,9 +85,13 @@ export default function LeaderboardPage() {
         {rows.length ? (
           rows.map((r, i) => (
             <div key={r.key} className="flex items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0">
-              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-bold ${i < 3 ? "bg-amber-400/20 text-amber-600 dark:text-amber-300" : "bg-fg/6 text-hint"}`}>
-                {i + 1}
-              </span>
+              {i < 3 ? (
+                <span className="chip grid h-9 w-9 shrink-0 place-items-center font-display text-xs font-bold text-white" style={{ ["--chip" as string]: ["#d79a1e", "#8e9aa6", "#b06a3b"][i] }}>
+                  <span className="relative z-10">{i + 1}</span>
+                </span>
+              ) : (
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-fg/6 font-display text-xs font-bold text-hint">{i + 1}</span>
+              )}
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-semibold">{r.displayName}</span>
                 <span className="block text-[12px] text-hint">
@@ -102,10 +106,10 @@ export default function LeaderboardPage() {
               </span>
               <span className="text-right">
                 {currentTab === "tournament" ? (
-                  <span className="block text-lg font-bold tabular">{r.points}</span>
+                  <span className="block font-display text-xl font-bold tabular">{r.points}</span>
                 ) : (
                   <>
-                    <Signed value={r.netBuyins} className="block text-lg font-bold">{fmtBuyins(r.netBuyins)}</Signed>
+                    <Signed value={r.netBuyins} className="block font-display text-lg font-bold">{fmtBuyins(r.netBuyins)}</Signed>
                     <Signed value={r.netChips} className="block text-[12px]">{fmtSigned(r.netChips)}</Signed>
                   </>
                 )}
@@ -122,7 +126,7 @@ export default function LeaderboardPage() {
           {data.recent.map((g) => (
             <Link key={g.id} href={`/g/${g.id}/summary`} className="flex items-center justify-between border-b border-sep px-4 py-3 last:border-b-0 active:bg-fg/5">
               <span>
-                <span className="block font-medium">{g.type === "cash" ? "💵" : "🏆"} {g.name}</span>
+                <span className="block font-bold">{g.name}</span>
                 <span className="block text-[12px] text-hint">{fmtDate(g.finishedAt)}{g.winner ? ` · 🥇 ${g.winner}` : ""}</span>
               </span>
               <span className="text-hint">›</span>

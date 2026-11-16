@@ -89,8 +89,8 @@ export function StackEditor({
 
       {editable ? (
         <>
-          <div className="mb-3 rounded-2xl bg-fg/5 px-4 py-3 text-center">
-            <div className={`text-4xl font-extrabold tabular ${fresh ? "text-fg" : "text-link"}`}>{fmtChips(value)}</div>
+          <div className="mb-3 rounded-[26px] bg-fg/5 px-4 py-3.5 text-center ring-1 ring-inset ring-fg/5">
+            <div className={`font-display text-[2.6rem] font-bold leading-tight tabular ${fresh ? "text-fg" : "text-link"}`}>{fmtChips(value)}</div>
             <div className="h-5 text-sm">
               {delta !== 0 && <Signed value={delta}>{fmtSigned(delta)} від поточного</Signed>}
             </div>
@@ -102,7 +102,7 @@ export function StackEditor({
                 key={n}
                 type="button"
                 onClick={() => step(n)}
-                className={`h-11 rounded-xl text-sm font-bold tabular active:scale-95 ${n < 0 ? "bg-neg/12 text-neg" : "bg-pos/12 text-pos"}`}
+                className={`h-11 rounded-full text-sm font-bold tabular transition active:scale-95 ${n < 0 ? "bg-neg/12 text-neg" : "bg-pos/14 text-pos"}`}
               >
                 {n > 0 ? "+" : "−"}
                 {fmtChips(Math.abs(n))}
@@ -116,7 +116,7 @@ export function StackEditor({
                 key={d}
                 type="button"
                 onClick={() => press(d)}
-                className="h-13 rounded-xl bg-fg/6 text-xl font-semibold active:scale-95 active:bg-fg/12"
+                className="glass h-14 rounded-[22px] font-display text-xl font-semibold transition active:scale-95"
               >
                 {d}
               </button>
@@ -193,8 +193,8 @@ export function StackEditor({
           ) : null}
         </>
       ) : (
-        <div className="mb-4 rounded-2xl bg-fg/5 px-4 py-4 text-center">
-          <div className="text-4xl font-extrabold tabular">{fmtChips(player.currentChips)}</div>
+        <div className="mb-4 rounded-[26px] bg-fg/5 px-4 py-4 text-center">
+          <div className="font-display text-4xl font-bold tabular">{fmtChips(player.currentChips)}</div>
           <div className="mt-1 text-sm text-hint">
             {state.viewer ? "Змінювати цей стек може лише сам гравець або хост." : "Увійдіть, щоб оновлювати свій стек."}
           </div>
@@ -203,10 +203,10 @@ export function StackEditor({
 
       {playerBuyins.length > 0 && (
         <div className="mb-3">
-          <div className="mb-1 text-[13px] font-medium uppercase tracking-wide text-hint">Бай-іни</div>
-          <div className="rounded-xl bg-fg/4">
+          <div className="mb-1.5 px-1 text-[13px] font-bold text-hint">Бай-іни</div>
+          <div className="rounded-[22px] bg-fg/5">
             {playerBuyins.map((b) => (
-              <div key={b.id} className="flex items-center justify-between border-b border-sep px-3 py-2 text-sm last:border-b-0">
+              <div key={b.id} className="flex items-center justify-between border-b hairline px-3.5 py-2.5 text-sm last:border-b-0">
                 <span>
                   {b.kind === "buyin" ? "Бай-ін" : b.kind === "rebuy" ? "Ребай" : "Аддон"} · <b className="tabular">{fmtChips(b.chips)}</b>
                 </span>

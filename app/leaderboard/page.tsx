@@ -17,13 +17,13 @@ export default function LeaderboardIndex() {
   if (!me?.user) return <LoginPanel />;
   return (
     <div>
-      <h1 className="mb-3 px-1 text-2xl font-bold">Лідерборд</h1>
+      <h1 className="font-display mb-4 px-1 text-[1.6rem] font-bold">Рейтинг</h1>
       <Section title="Ваші групи">
         {me.chats.length ? (
           me.chats.map((c) => (
             <Row key={c.id} href={`/leaderboard/${c.publicId}`}>
-              <span className="grid h-10 w-10 place-items-center rounded-full bg-button/15 text-lg">👥</span>
-              <span className="flex-1 font-semibold">{c.title}</span>
+              <span className="chip h-10 w-10 shrink-0" style={{ ["--chip" as string]: "var(--felt)" }} />
+              <span className="flex-1 font-bold">{c.title}</span>
               <span className="text-hint">›</span>
             </Row>
           ))

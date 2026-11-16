@@ -72,7 +72,7 @@ export function GameSettings({
                 key={m}
                 type="button"
                 onClick={() => setReminder(m)}
-                className={`flex-1 rounded-lg py-2 text-sm font-semibold ${reminder === m ? "bg-button text-button-fg" : "bg-fg/6"}`}
+                className={`flex-1 rounded-full py-2.5 text-sm font-bold ${reminder === m ? "glass-tint" : "bg-fg/6"}`}
               >
                 {m ? `${m} хв` : "Вимк."}
               </button>
@@ -82,14 +82,14 @@ export function GameSettings({
       ) : null}
 
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[13px] font-medium uppercase tracking-wide text-hint">Структура блайндів</span>
+        <span className="px-1 text-[15px] font-bold">Структура блайндів</span>
       </div>
       <div className="mb-2 flex flex-wrap gap-2">
         {(Object.keys(BLIND_TEMPLATES) as BlindTemplateId[]).map((t) => (
           <button
             key={t}
             type="button"
-            className="rounded-full bg-button/12 px-3 py-1 text-[13px] font-semibold text-link"
+            className="glass rounded-full px-3.5 py-1.5 text-[13px] font-bold text-link"
             onClick={() => setLevels(buildStructure(t, game.startingStack))}
           >
             {BLIND_TEMPLATES[t].label}

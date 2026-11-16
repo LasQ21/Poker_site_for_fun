@@ -8,7 +8,7 @@ import { BLIND_TEMPLATES, buildStructure, formatBlinds, type BlindTemplateId } f
 import { fmtChips } from "@/lib/format";
 import { useMe, useToast } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
-import { Button, Field, inputCls, PageLoader, Section, Segmented } from "@/components/ui";
+import { Button, Choice, Field, inputCls, PageLoader, Section, Segmented } from "@/components/ui";
 
 const STACKS = [5_000, 10_000, 20_000, 50_000];
 const REMINDERS = [0, 15, 30, 45, 60];
@@ -70,7 +70,7 @@ export default function NewGamePage() {
 
   return (
     <div>
-      <h1 className="mb-3 px-1 text-2xl font-bold">Нова гра</h1>
+      <h1 className="font-display mb-4 px-1 text-2xl font-bold">Нова гра</h1>
 
       <Section>
         <div className="p-3">
@@ -81,8 +81,8 @@ export default function NewGamePage() {
               haptic("select");
             }}
             options={[
-              { value: "tournament", label: "🏆 Турнір" },
-              { value: "cash", label: "💵 Кеш" },
+              { value: "tournament", label: "Турнір" },
+              { value: "cash", label: "Кеш" },
             ]}
           />
           <p className="mt-2 px-1 text-[13px] text-hint">
@@ -97,14 +97,9 @@ export default function NewGamePage() {
         <Field label="Стартовий стек (фішки)">
           <div className="mb-2 flex gap-2">
             {STACKS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStack(s)}
-                className={`flex-1 rounded-lg py-2 text-sm font-semibold tabular ${stack === s ? "bg-button text-button-fg" : "bg-fg/6"}`}
-              >
+              <Choice key={s} active={stack === s} onClick={() => setStack(s)}>
                 {fmtChips(s)}
-              </button>
+              </Choice>
             ))}
           </div>
           <input
@@ -158,14 +153,9 @@ export default function NewGamePage() {
               <Field label="Нагадування оновити стеки">
                 <div className="flex gap-2">
                   {REMINDERS.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setReminder(m)}
-                      className={`flex-1 rounded-lg py-2 text-sm font-semibold ${reminder === m ? "bg-button text-button-fg" : "bg-fg/6"}`}
-                    >
+                    <Choice key={m} active={reminder === m} onClick={() => setReminder(m)}>
                       {m ? `${m} хв` : "Вимк."}
-                    </button>
+                    </Choice>
                   ))}
                 </div>
               </Field>

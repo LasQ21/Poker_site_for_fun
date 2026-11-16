@@ -32,16 +32,19 @@ export default function SummaryPage() {
 
   return (
     <div>
-      <div className="mb-4 rounded-3xl bg-gradient-to-br from-felt to-felt-2 px-5 py-5 text-white">
-        <div className="flex items-center gap-2 text-[13px] text-white/75">
-          {cash ? "💵 Кеш" : "🏆 Турнір"} · {fmtDateTime(game.createdAt)}
+      <div className="glass mb-5 rounded-[34px] px-5 py-5">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-hint">
+          {cash ? "Кеш" : "Турнір"}, {fmtDateTime(game.createdAt)}
           {game.status === "active" && <Badge tone="pos">ще триває</Badge>}
         </div>
-        <h1 className="mt-1 text-2xl font-bold">{game.name}</h1>
+        <h1 className="font-display mt-1 text-[1.6rem] font-bold leading-tight">{game.name}</h1>
         {winner && (
-          <div className="mt-3 text-lg">
-            🏆 <b>{winner.displayName}</b>
-            <span className="text-white/80"> — {cash ? `${fmtSigned(winner.netChips)} (${fmtBuyins(winner.netBuyins)})` : `${winner.points} очк.`}</span>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="chip h-12 w-12 shrink-0" style={{ ["--chip" as string]: "var(--gold)" }} />
+            <span>
+              <span className="font-display block text-lg font-bold">{winner.displayName}</span>
+              <span className="text-sm font-semibold text-hint">{cash ? `${fmtSigned(winner.netChips)} (${fmtBuyins(winner.netBuyins)})` : `${winner.points} очк.`}</span>
+            </span>
           </div>
         )}
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -57,7 +60,7 @@ export default function SummaryPage() {
             <span className="w-7 text-center text-lg">{MEDALS[r.place - 1] ?? <span className="text-sm text-hint">{r.place}</span>}</span>
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: playerColor(state, r.playerId) }} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">{r.displayName}</span>
+              <span className="block truncate font-bold">{r.displayName}</span>
               <span className="block text-[12px] text-hint tabular">
                 {r.buyinCount} БІ · {fmtChips(r.buyinChips)} → {fmtChips(r.finalChips)}
               </span>
@@ -90,11 +93,11 @@ export default function SummaryPage() {
         <Button variant="secondary" onClick={() => openExternal(`${window.location.origin}/api/games/${game.id}/export.csv`)}>
           ⬇️ CSV
         </Button>
-        <Link href={`/g/${game.id}`} className="inline-flex h-11 items-center justify-center rounded-xl bg-button/12 font-semibold text-link">
+        <Link href={`/g/${game.id}`} className="glass inline-flex h-11 items-center justify-center rounded-full font-bold text-link">
           До гри
         </Link>
         {state.chat && (
-          <Link href={`/leaderboard/${state.chat.publicId}`} className="col-span-2 inline-flex h-11 items-center justify-center rounded-xl bg-button font-semibold text-button-fg">
+          <Link href={`/leaderboard/${state.chat.publicId}`} className="glass-tint col-span-2 inline-flex h-12 items-center justify-center rounded-full font-bold">
             🏆 Лідерборд «{state.chat.title}»
           </Link>
         )}
@@ -105,9 +108,9 @@ export default function SummaryPage() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl bg-white/12 py-2">
-      <div className="text-xl font-bold tabular">{value}</div>
-      <div className="text-[11px] text-white/75">{label}</div>
+    <div className="rounded-[20px] bg-fg/6 py-2.5">
+      <div className="font-display text-xl font-bold tabular">{value}</div>
+      <div className="text-[11px] font-semibold text-hint">{label}</div>
     </div>
   );
 }

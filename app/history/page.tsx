@@ -23,7 +23,7 @@ export default function HistoryPage() {
 
   return (
     <div>
-      <h1 className="mb-3 px-1 text-2xl font-bold">Історія</h1>
+      <h1 className="font-display mb-4 px-1 text-[1.6rem] font-bold">Історія</h1>
       {data.games.length === 0 ? (
         <Section>
           <Empty icon="🗂" title="Ще немає завершених ігор" />

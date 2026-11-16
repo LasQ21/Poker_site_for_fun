@@ -7,6 +7,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/client/api";
 import { getWebApp } from "@/lib/client/telegram";
 import type { MeDTO } from "@/lib/types";
+import { IconCards, IconHistory, IconTrophy } from "./icons";
 import { Toast } from "./ui";
 
 const ToastCtx = createContext<(msg: string) => void>(() => {});
@@ -17,9 +18,9 @@ export function useMe() {
 }
 
 const TABS = [
-  { href: "/", label: "Ігри", icon: "🃏", match: (p: string) => p === "/" },
-  { href: "/leaderboard", label: "Лідерборд", icon: "🏆", match: (p: string) => p.startsWith("/leaderboard") },
-  { href: "/history", label: "Історія", icon: "🗂", match: (p: string) => p.startsWith("/history") },
+  { href: "/", label: "Ігри", Icon: IconCards, match: (p: string) => p === "/" },
+  { href: "/leaderboard", label: "Рейтинг", Icon: IconTrophy, match: (p: string) => p.startsWith("/leaderboard") },
+  { href: "/history", label: "Історія", Icon: IconHistory, match: (p: string) => p.startsWith("/history") },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -30,12 +31,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   const clearToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
+    // Real refraction only where backdrop-filter:url() works (Chromium, not iOS WebKit).
+    const ua = navigator.userAgent;
+    if (/Chrome\/|Chromium\//.test(ua) && !/iPhone|iPad|iPod|Version\/[\d.]+ Safari/.test(ua)) {
+      document.documentElement.classList.add("refract");
+    }
+
     const wa = getWebApp();
     if (!wa) return;
     setMiniApp(true);
     wa.ready();
     wa.expand();
     try {
+      if (wa.isVersionAtLeast("6.1")) {
+        wa.setHeaderColor?.("bg_color");
+        wa.setBackgroundColor?.("bg_color");
+      }
+      if (wa.isVersionAtLeast("7.10")) wa.setBottomBarColor?.("bg_color");
       if (wa.isVersionAtLeast("7.7")) wa.disableVerticalSwipes?.();
     } catch {}
     const applyTheme = () => {
@@ -59,20 +71,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={setToast}>
       {!miniApp && <SiteHeader />}
-      <main className={`mx-auto w-full max-w-2xl px-3 pt-3 ${showTabs ? "pb-24" : "pb-10"}`}>{children}</main>
+      <main
+        className={`mx-auto w-full max-w-xl px-3 ${showTabs ? "pb-32" : "pb-12"}`}
+        style={{ paddingTop: miniApp ? "calc(var(--safe-top) + 12px)" : 12 }}
+      >
+        {children}
+      </main>
       {showTabs && (
-        <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-sep bg-section/95 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl">
-            {TABS.map((t) => {
-              const active = t.match(pathname);
+        <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4" style={{ paddingBottom: "max(14px, var(--safe-bottom))" }}>
+          <div className="glass-pill pointer-events-auto flex w-full max-w-sm gap-1 rounded-full p-1.5">
+            {TABS.map(({ href, label, Icon, match }) => {
+              const active = match(pathname);
               return (
                 <Link
-                  key={t.href}
-                  href={t.href}
-                  className={`flex flex-1 flex-col items-center gap-0.5 pt-2 text-[11px] font-medium ${active ? "text-link" : "text-hint"}`}
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex flex-1 flex-col items-center gap-0.5 rounded-full py-1.5 text-[11px] font-bold transition-colors ${
+                    active ? "glass-strong text-link" : "text-hint"
+                  }`}
                 >
-                  <span className={`text-xl leading-none ${active ? "" : "grayscale opacity-70"}`}>{t.icon}</span>
-                  {t.label}
+                  <Icon width={22} height={22} />
+                  {label}
                 </Link>
               );
             })}
@@ -87,17 +107,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 function SiteHeader() {
   const { data } = useMe();
   return (
-    <header className="sticky top-0 z-30 border-b border-sep bg-section/90 backdrop-blur">
-      <div className="mx-auto flex h-12 max-w-2xl items-center justify-between px-4">
-        <Link href="/" className="flex items-center gap-2 font-bold">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-felt text-sm text-white">♠</span>
-          Poker Tracker
+    <header className="sticky top-0 z-30 px-3 pt-3">
+      <div className="glass mx-auto flex h-14 max-w-xl items-center justify-between rounded-full pl-2 pr-4">
+        <Link href="/" className="flex items-center gap-2.5">
+          <span className="chip grid h-10 w-10 place-items-center text-white" style={{ ["--chip" as string]: "var(--felt)" }}>
+            <span className="relative z-10 text-sm">♠</span>
+          </span>
+          <span className="font-display text-[15px] font-bold">Poker Tracker</span>
         </Link>
         {data?.user && (
-          <span className="flex items-center gap-2 text-sm text-hint">
+          <span className="flex items-center gap-2 text-sm font-semibold text-hint">
             {data.user.photoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={data.user.photoUrl} alt="" className="h-6 w-6 rounded-full" />
+              <img src={data.user.photoUrl} alt="" className="h-7 w-7 rounded-full" />
             ) : null}
             {data.user.firstName}
           </span>

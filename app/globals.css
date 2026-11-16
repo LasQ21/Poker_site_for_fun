@@ -1,69 +1,85 @@
 @import "tailwindcss";
 
 /*
- * Colours follow the Telegram theme when running as a Mini App (telegram-web-app.js sets
- * --tg-theme-* on <html>); on the website the fallbacks below apply, light or dark.
+ * Liquid-glass theme.
+ * In the Mini App the colours follow Telegram's theme (telegram-web-app.js sets --tg-theme-* on <html>);
+ * on the website the fallbacks below apply. Glass panels float over an ambient "felt" backdrop.
  */
 :root {
-  --fb-bg: #ffffff;
-  --fb-secondary-bg: #f0f2f5;
+  --fb-bg: #e6ecea;
   --fb-section-bg: #ffffff;
-  --fb-text: #0f1419;
-  --fb-hint: #6b7480;
-  --fb-link: #1f7ad1;
-  --fb-button: #1f7ad1;
+  --fb-text: #0d1a16;
+  --fb-hint: #5f6f69;
+  --fb-link: #0b7a55;
+  --fb-button: #0f8a5f;
   --fb-button-text: #ffffff;
-  --fb-accent: #1f7ad1;
-  --fb-destructive: #d63b3b;
-  --fb-separator: rgba(15, 20, 25, 0.08);
-  --positive: #16a34a;
-  --negative: #dc2626;
-  --felt: #0f6b46;
-  --felt-2: #0b5236;
+  --fb-destructive: #d23a35;
+  --positive: #0f9d63;
+  --negative: #d9423b;
+  --gold: #d79a1e;
+  --felt: #0e5a3e;
+  --felt-2: #063021;
+  /* glass */
+  --glass-tint: 55%;
+  --glass-edge: rgba(255, 255, 255, 0.85);
+  --glass-edge-2: rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 10px 30px -12px rgba(6, 40, 28, 0.28), 0 2px 6px -2px rgba(6, 40, 28, 0.12);
+  --ambient-1: rgba(14, 138, 95, 0.38);
+  --ambient-2: rgba(232, 170, 50, 0.34);
+  --ambient-3: rgba(217, 66, 59, 0.2);
+  --ambient-4: rgba(52, 120, 220, 0.2);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --fb-bg: #17212b;
-    --fb-secondary-bg: #0e1621;
-    --fb-section-bg: #17212b;
-    --fb-text: #f5f5f5;
-    --fb-hint: #8b98a5;
-    --fb-link: #6ab3f3;
-    --fb-button: #5288c1;
-    --fb-button-text: #ffffff;
-    --fb-accent: #6ab3f3;
-    --fb-destructive: #ec5b5b;
-    --fb-separator: rgba(255, 255, 255, 0.08);
-    --positive: #4ade80;
-    --negative: #f87171;
-    --felt: #14583c;
-    --felt-2: #0d3f2b;
+    --fb-bg: #06120e;
+    --fb-section-bg: #10221b;
+    --fb-text: #eef5f1;
+    --fb-hint: #8aa197;
+    --fb-link: #5fd3a2;
+    --fb-button: #1fa874;
+    --fb-destructive: #ff6b63;
+    --positive: #4ade95;
+    --negative: #ff6b63;
+    --glass-tint: 52%;
+    --glass-edge: rgba(255, 255, 255, 0.22);
+    --glass-edge-2: rgba(255, 255, 255, 0.04);
+    --glass-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.7), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+    --ambient-1: rgba(20, 160, 105, 0.32);
+    --ambient-2: rgba(232, 180, 74, 0.16);
+    --ambient-3: rgba(217, 66, 59, 0.16);
+    --ambient-4: rgba(60, 110, 230, 0.16);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --positive: #4ade80;
-  --negative: #f87171;
-  --fb-separator: rgba(255, 255, 255, 0.08);
-  --felt: #14583c;
-  --felt-2: #0d3f2b;
+  --positive: #4ade95;
+  --negative: #ff6b63;
+  --glass-tint: 52%;
+  --glass-edge: rgba(255, 255, 255, 0.22);
+  --glass-edge-2: rgba(255, 255, 255, 0.04);
+  --glass-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.7), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --ambient-1: rgba(20, 160, 105, 0.32);
+  --ambient-2: rgba(232, 180, 74, 0.16);
+  --ambient-3: rgba(217, 66, 59, 0.16);
+  --ambient-4: rgba(60, 110, 230, 0.16);
   color-scheme: dark;
 }
 
 :root {
-  --app-bg: var(--tg-theme-secondary-bg-color, var(--fb-secondary-bg));
-  --app-section: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, var(--fb-section-bg)));
+  --app-bg: var(--tg-theme-bg-color, var(--fb-bg));
+  --app-section: var(--tg-theme-section-bg-color, var(--tg-theme-secondary-bg-color, var(--fb-section-bg)));
   --app-text: var(--tg-theme-text-color, var(--fb-text));
   --app-hint: var(--tg-theme-hint-color, var(--fb-hint));
   --app-link: var(--tg-theme-link-color, var(--fb-link));
   --app-button: var(--tg-theme-button-color, var(--fb-button));
   --app-button-text: var(--tg-theme-button-text-color, var(--fb-button-text));
-  --app-accent: var(--tg-theme-accent-text-color, var(--fb-accent));
   --app-destructive: var(--tg-theme-destructive-text-color, var(--fb-destructive));
-  --app-separator: var(--tg-theme-section-separator-color, var(--fb-separator));
+  --app-separator: color-mix(in srgb, var(--app-text) 9%, transparent);
+  --safe-top: var(--tg-content-safe-area-inset-top, 0px);
+  --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
 }
 
 @theme inline {
@@ -74,33 +90,154 @@
   --color-link: var(--app-link);
   --color-button: var(--app-button);
   --color-button-fg: var(--app-button-text);
-  --color-accent: var(--app-accent);
   --color-danger: var(--app-destructive);
   --color-sep: var(--app-separator);
   --color-pos: var(--positive);
   --color-neg: var(--negative);
+  --color-gold: var(--gold);
   --color-felt: var(--felt);
   --color-felt-2: var(--felt-2);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Unbounded", "Manrope", ui-sans-serif, system-ui, sans-serif;
 }
 
 html,
 body {
-  background: var(--app-bg);
   color: var(--app-text);
+  background: var(--app-bg);
 }
 
 body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Ambient felt-and-chips light under the glass. Fixed so panels refract a stable scene. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20vmax;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38vmax 38vmax at 12% 8%, var(--ambient-1), transparent 70%),
+    radial-gradient(30vmax 30vmax at 92% 22%, var(--ambient-2), transparent 70%),
+    radial-gradient(34vmax 34vmax at 80% 88%, var(--ambient-3), transparent 70%),
+    radial-gradient(30vmax 30vmax at 8% 72%, var(--ambient-4), transparent 70%),
+    var(--app-bg);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
+@layer components {
+/* ---------------------------------------------------------------- glass material */
+
+.glass,
+.glass-strong,
+.glass-pill,
+.glass-tint {
+  position: relative;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--app-section) var(--glass-tint), transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-edge),
+    inset 0 -1px 0 0 var(--glass-edge-2),
+    inset 1px 0 0 0 var(--glass-edge-2),
+    var(--glass-shadow);
+}
+
+/* Specular sheen: a soft light catching the upper-left curve of the glass. */
+.glass::after,
+.glass-strong::after,
+.glass-pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, white 30%, transparent) 0%,
+    transparent 38%,
+    transparent 70%,
+    color-mix(in srgb, white 8%, transparent) 100%
+  );
+  opacity: 0.6;
+}
+
+.glass-strong {
+  --glass-tint: 78%;
+  -webkit-backdrop-filter: blur(34px) saturate(190%);
+  backdrop-filter: blur(34px) saturate(190%);
+}
+
+/* Chromium (Telegram Android / Desktop, Chrome) can bend the backdrop through an SVG lens. */
+html.refract .glass-pill,
+html.refract .glass-lens {
+  backdrop-filter: url(#lg-refract) blur(14px) saturate(190%);
+}
+
+/* Coloured glass for primary actions. */
+.glass-tint {
+  background: color-mix(in srgb, var(--app-button) 88%, transparent);
+  color: var(--app-button-text);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 6px 0 rgba(0, 0, 0, 0.12),
+    0 8px 22px -10px color-mix(in srgb, var(--app-button) 80%, transparent);
+}
+
+.hairline {
+  border-color: var(--app-separator);
+}
+
+/* Poker chip: coloured disc with the white edge inserts. */
+.chip {
+  position: relative;
+  border-radius: 9999px;
+  background: var(--chip, var(--felt));
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, black 12%, transparent),
+    inset 0 2px 3px rgba(255, 255, 255, 0.35),
+    0 3px 8px -3px rgba(0, 0, 0, 0.35);
+}
+.chip::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: inherit;
+  border: 3px dashed rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+.chip::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+}
+
 .pb-safe {
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  padding-bottom: max(1rem, var(--safe-bottom));
+}
+
+:focus-visible {
+  outline: 2px solid var(--app-link);
+  outline-offset: 2px;
 }
 
 @keyframes sheet-in {
@@ -119,15 +256,30 @@ body {
     opacity: 1;
   }
 }
+@keyframes level-up {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
 .animate-sheet {
-  animation: sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: sheet-in 0.32s cubic-bezier(0.2, 0.9, 0.25, 1.05);
 }
 .animate-fade {
   animation: fade-in 0.18s ease-out;
 }
+.animate-level {
+  animation: level-up 0.6s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
 @media (prefers-reduced-motion: reduce) {
   .animate-sheet,
-  .animate-fade {
+  .animate-fade,
+  .animate-level {
     animation: none;
   }
 }

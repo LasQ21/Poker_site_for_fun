@@ -48,9 +48,9 @@ export function LoginPanel({ compact }: { compact?: boolean }) {
   return (
     <Section>
       <div className={`flex flex-col items-center gap-3 px-5 text-center ${compact ? "py-5" : "py-8"}`}>
-        {!compact && <div className="text-5xl">♠️</div>}
+        
         <div>
-          <div className="text-lg font-bold">Увійдіть через Telegram</div>
+          <div className="font-display text-lg font-bold">Увійдіть через Telegram</div>
           <div className="mt-1 text-sm text-hint">Щоб створювати ігри та оновлювати свій стек. Переглядати гру за посиланням можна й без входу.</div>
         </div>
         <div ref={box} className="min-h-10" />

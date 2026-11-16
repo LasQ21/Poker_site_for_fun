@@ -24,6 +24,7 @@ export interface TelegramWebApp {
   disableVerticalSwipes?: () => void;
   setHeaderColor?: (c: string) => void;
   setBackgroundColor?: (c: string) => void;
+  setBottomBarColor?: (c: string) => void;
   BackButton: TgButton;
   HapticFeedback?: {
     impactOccurred(s: Haptic): void;

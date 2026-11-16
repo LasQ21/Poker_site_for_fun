@@ -2,9 +2,11 @@
 
 import { fmtBuyins, fmtChips, fmtSigned } from "@/lib/format";
 import type { GameStateDTO, PlayerDTO } from "@/lib/types";
-import { Badge, Signed } from "./ui";
+import { IconChevron } from "./icons";
+import { Badge, ChipAvatar, Signed } from "./ui";
 
-export const PLAYER_COLORS = ["#2f80ed", "#eb5757", "#27ae60", "#f2994a", "#9b51e0", "#00a3bf", "#e84393", "#8d6e63", "#d4a017", "#6c7a89"];
+/** Chip colours: classic casino denominations first. */
+export const PLAYER_COLORS = ["#d9423b", "#2f6fdb", "#0f8a5f", "#475569", "#7b4bd6", "#e08a1e", "#d63d8c", "#11a3b8", "#8a6a3d", "#5a6b7b"];
 
 export function playerColor(state: GameStateDTO, playerId: number) {
   const idx = state.players.findIndex((p) => p.id === playerId);
@@ -45,34 +47,33 @@ export function StackTable({ state, onSelect, now, bb }: { state: GameStateDTO; 
             key={p.id}
             type="button"
             onClick={() => onSelect(p)}
-            className={`relative flex w-full items-center gap-3 border-b border-sep px-4 py-3 text-left last:border-b-0 transition-colors active:bg-fg/5 ${out ? "opacity-55" : ""}`}
+            className={`relative flex w-full items-center gap-3 border-b hairline px-3.5 py-3 text-left last:border-b-0 transition-colors active:bg-fg/5 ${out ? "opacity-55" : ""}`}
           >
-            <span
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[15px] font-bold text-white"
-              style={{ background: playerColor(state, p.id) }}
-            >
-              {game.type === "tournament" && out ? r?.place ?? "—" : p.displayName.slice(0, 1).toUpperCase()}
-            </span>
+            <ChipAvatar
+              color={playerColor(state, p.id)}
+              muted={out}
+              label={game.type === "tournament" && out ? (r?.place ?? "—") : p.displayName.slice(0, 1).toUpperCase()}
+            />
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">
-                <span className={`truncate font-semibold ${out && game.type === "tournament" ? "line-through" : ""}`}>{p.displayName}</span>
+                <span className={`truncate font-bold ${out && game.type === "tournament" ? "line-through" : ""}`}>{p.displayName}</span>
                 {mine && <Badge tone="accent">ви</Badge>}
                 {p.userId == null && <span title="Без Telegram" className="text-[11px] text-hint">○</span>}
                 {p.userId === state.game.hostUserId && <span title="Хост" className="text-[12px]">👑</span>}
               </span>
-              <span className="mt-0.5 block text-[12px] text-hint">
+              <span className="mt-0.5 block text-[12px] font-medium text-hint">
                 {game.type === "tournament" && out
                   ? `вибув · ${r?.place}-е місце`
                   : `${p.buyinCount} БІ · ${ago(p.lastUpdateAt, now)}`}
               </span>
               {!out && (
-                <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-fg/8">
+                <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-fg/8">
                   <span className="block h-full rounded-full" style={{ width: `${(p.currentChips / leader) * 100}%`, background: playerColor(state, p.id) }} />
                 </span>
               )}
             </span>
             <span className="shrink-0 text-right">
-              <span className="block text-lg font-bold tabular">{fmtChips(p.currentChips)}</span>
+              <span className="block font-display text-[17px] font-bold tabular">{fmtChips(p.currentChips)}</span>
               {game.type === "cash" && r ? (
                 <Signed value={r.netChips} className="block text-[12px] font-semibold">
                   {fmtSigned(r.netChips)} · {fmtBuyins(r.netBuyins)}
@@ -83,7 +84,7 @@ export function StackTable({ state, onSelect, now, bb }: { state: GameStateDTO; 
                 </span>
               )}
             </span>
-            {editable && <span className="text-hint">›</span>}
+            {editable && <IconChevron className="shrink-0 text-hint/70" />}
           </button>
         );
       })}

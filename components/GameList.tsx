@@ -2,6 +2,7 @@
 
 import { fmtDate, fmtDateTime, pluralUk } from "@/lib/format";
 import type { GameListItemDTO } from "@/lib/types";
+import { IconChevron } from "./icons";
 import { Badge, Row } from "./ui";
 
 export function GameList({ games, summaryLinks }: { games: GameListItemDTO[]; summaryLinks?: boolean }) {
@@ -9,23 +10,26 @@ export function GameList({ games, summaryLinks }: { games: GameListItemDTO[]; su
     <>
       {games.map((g) => (
         <Row key={g.id} href={summaryLinks || g.status === "finished" ? `/g/${g.id}/summary` : `/g/${g.id}`}>
-          <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg ${g.type === "cash" ? "bg-pos/15" : "bg-button/15"}`}>
-            {g.type === "cash" ? "💵" : "🏆"}
-          </div>
+          <span
+            className="chip grid h-11 w-11 shrink-0 place-items-center text-base"
+            style={{ ["--chip" as string]: g.type === "cash" ? "#0f8a5f" : "#2f6fdb" }}
+          >
+            <span className="relative z-10">{g.type === "cash" ? "$" : "★"}</span>
+          </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate font-semibold">{g.name}</span>
+              <span className="truncate font-bold">{g.name}</span>
               {g.status === "active" && <Badge tone="pos">триває</Badge>}
               {g.isHost && <Badge>хост</Badge>}
             </div>
-            <div className="truncate text-[13px] text-hint">
-              {g.status === "finished" ? fmtDate(g.finishedAt) : fmtDateTime(g.createdAt)} · {g.playerCount}{" "}
+            <div className="truncate text-[13px] font-medium text-hint">
+              {g.status === "finished" ? fmtDate(g.finishedAt) : fmtDateTime(g.createdAt)}, {g.playerCount}{" "}
               {pluralUk(g.playerCount, "гравець", "гравці", "гравців")}
-              {g.chatTitle ? ` · ${g.chatTitle}` : ""}
-              {g.winner ? ` · 🥇 ${g.winner}` : ""}
+              {g.chatTitle ? ` у «${g.chatTitle}»` : ""}
             </div>
+            {g.winner && <div className="truncate text-[13px] font-semibold text-gold">🏆 {g.winner}</div>}
           </div>
-          <span className="text-hint">›</span>
+          <IconChevron className="shrink-0 text-hint/70" />
         </Row>
       ))}
     </>

@@ -3,7 +3,7 @@ import { json, route } from "@/lib/server/http";
 import { actionSchema } from "@/lib/server/schemas";
 import * as G from "@/lib/server/games";
 import { escapeHtml, notifyChat, sendCsv, urlButton } from "@/lib/telegram/api";
-import { gameWebUrl } from "@/lib/config";
+import { ensureBotUsername, gameWebUrl } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 /** All game mutations go through one endpoint; permissions are checked in lib/server/games. */
 export const POST = route(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
-  const viewer = await requireViewer();
+  const [viewer] = await Promise.all([requireViewer(), ensureBotUsername()]);
   const a = actionSchema.parse(await req.json());
   let result: unknown = null;
   switch (a.action) {

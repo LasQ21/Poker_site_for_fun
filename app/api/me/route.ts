@@ -1,12 +1,12 @@
 import { getViewer } from "@/lib/server/viewer";
 import { json, route } from "@/lib/server/http";
 import { chatsForUser } from "@/lib/server/leaderboard";
-import { appUrl, config, miniAppLink } from "@/lib/config";
+import { appUrl, config, ensureBotUsername, miniAppLink } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 export const GET = route(async () => {
-  const user = await getViewer();
+  const [user] = await Promise.all([getViewer(), ensureBotUsername()]);
   return json({
     user,
     chats: user ? await chatsForUser(user.id) : [],

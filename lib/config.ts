@@ -4,8 +4,9 @@ export const config = {
   get botToken() {
     return process.env.BOT_TOKEN ?? "";
   },
+  /** BOT_USERNAME, or the username learned from getMe (see ensureBotUsername). */
   get botUsername() {
-    return (process.env.BOT_USERNAME ?? "").replace(/^@/, "");
+    return (process.env.BOT_USERNAME || detectedUsername).replace(/^@/, "");
   },
   get miniAppShortName() {
     return process.env.MINIAPP_SHORT_NAME ?? "";
@@ -26,6 +27,26 @@ export const config = {
     return process.env.DEV_LOGIN === "1" && process.env.NODE_ENV !== "production";
   },
 };
+
+let detectedUsername = "";
+let detecting: Promise<string> | null = null;
+
+/** Resolves the bot username via Telegram getMe when BOT_USERNAME is not configured. */
+export async function ensureBotUsername(): Promise<string> {
+  if (config.botUsername || !config.botToken) return config.botUsername;
+  detecting ??= fetch(`https://api.telegram.org/bot${config.botToken}/getMe`)
+    .then((r) => r.json())
+    .then((j: { ok: boolean; result?: { username?: string } }) => (detectedUsername = j.result?.username ?? ""))
+    .catch(() => "")
+    .finally(() => {
+      detecting = null;
+    });
+  return detecting;
+}
+
+export function setDetectedBotUsername(name: string | undefined) {
+  if (name) detectedUsername = name;
+}
 
 export function appUrl(): string {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");

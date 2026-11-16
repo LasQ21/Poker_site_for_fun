@@ -3,7 +3,7 @@ import type { BotCommand, UserFromGetMe } from "grammy/types";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { appUrl, config, gameWebUrl, miniAppLink } from "@/lib/config";
+import { appUrl, config, gameWebUrl, miniAppLink, setDetectedBotUsername } from "@/lib/config";
 import { fmtBuyins, fmtChips, fmtDate } from "@/lib/format";
 import { parseChips } from "@/lib/game/parse";
 import { AppError } from "@/lib/server/errors";
@@ -84,6 +84,7 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
 
   // Remember users, groups and who is in which group (for leaderboards and game creation).
   bot.use(async (ctx, next) => {
+    setDetectedBotUsername(ctx.me?.username);
     try {
       if (ctx.from && !ctx.from.is_bot) {
         await upsertUser(ctx.from);

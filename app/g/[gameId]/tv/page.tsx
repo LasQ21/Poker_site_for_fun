@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatBlinds, formatClock, levelDurationMs, type TimerAction } from "@/lib/game/blinds";
 import { useAppBack } from "@/lib/client/nav";
 import { tr, useT } from "@/lib/i18n/client";
@@ -14,28 +14,45 @@ import { useToast } from "@/components/AppShell";
 import { IconNext, IconPause, IconPlay, IconPrev } from "@/components/icons";
 import { Empty, PageLoader } from "@/components/ui";
 
-/** Keeps the screen awake while mounted (re-acquired when the tab becomes visible again). */
+/**
+ * Keeps the screen awake while mounted. The browser drops the lock when the tab is hidden; it is
+ * re-acquired when the tab becomes visible again. Acquisition is idempotent: at most one lock is held
+ * or requested at a time, so an initial request overlapping a visibilitychange can't leak a lock.
+ */
 function useWakeLock() {
   useEffect(() => {
-    type Sentinel = { release(): Promise<void> };
+    type Sentinel = { released?: boolean; release(): Promise<void>; addEventListener?(type: "release", cb: () => void): void };
     const nav = navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<Sentinel> } };
     if (!nav.wakeLock) return;
     let lock: Sentinel | null = null;
+    let pending = false;
     let disposed = false;
     const acquire = async () => {
-      if (document.visibilityState !== "visible") return;
+      if (disposed || pending || (lock && !lock.released) || document.visibilityState !== "visible") return;
+      pending = true;
       try {
         const l = await nav.wakeLock!.request("screen");
-        if (disposed) void l.release();
-        else lock = l;
-      } catch {}
+        if (disposed) {
+          void l.release().catch(() => {});
+          return;
+        }
+        lock = l;
+        l.addEventListener?.("release", () => {
+          if (lock === l) lock = null;
+        });
+      } catch {
+      } finally {
+        pending = false;
+      }
     };
     void acquire();
     document.addEventListener("visibilitychange", acquire);
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", acquire);
-      void lock?.release().catch(() => {});
+      const l = lock;
+      lock = null;
+      if (l && !l.released) void l.release().catch(() => {});
     };
   }, []);
 }
@@ -78,6 +95,8 @@ function TvBoard({
   const t = useT();
   const v = useTimer(game, clockOffset);
   const [browserFs, setBrowserFs] = useState(false);
+  /** Whether this page put the document into fullscreen (⤢), so leaving it can undo that. */
+  const enteredFs = useRef(false);
   const host = state.role === "host" && game.status === "active";
   const dur = levelDurationMs(v.level);
   const progress = Number.isFinite(dur) ? Math.min(1, Math.max(0, 1 - v.remainingMs / dur)) : 0;
@@ -86,7 +105,8 @@ function TvBoard({
   const upcoming = game.blindStructure.slice(v.levelIndex + 1, v.levelIndex + 4);
   const alive = state.players.filter((p) => p.status === "active");
   const top = [...alive].sort((a, b) => b.currentChips - a.currentChips).slice(0, 5);
-  const avg = alive.length ? state.check.totalStacks / alive.length : 0;
+  // Only chips still in play: totalStacks also counts players who left a cash game.
+  const avg = alive.length ? alive.reduce((s, p) => s + p.currentChips, 0) / alive.length : 0;
   const bb = v.level.isBreak ? (game.blindStructure.slice(0, v.levelIndex).reverse().find((l) => !l.isBreak)?.bb ?? 0) : v.level.bb;
 
   const timer = async (a: TimerAction) => {
@@ -101,8 +121,26 @@ function TvBoard({
   useEffect(() => {
     const onFs = () => setBrowserFs(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", onFs);
-    return () => document.removeEventListener("fullscreenchange", onFs);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      // Leaving the TV page (✕ / back) must not leave the rest of the app stuck in fullscreen.
+      if (enteredFs.current && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    };
   }, []);
+
+  const toggleFullscreen = () => {
+    if (browserFs) {
+      enteredFs.current = false;
+      document.exitFullscreen().catch(() => {});
+    } else {
+      document.documentElement
+        .requestFullscreen()
+        .then(() => {
+          enteredFs.current = true;
+        })
+        .catch(() => {});
+    }
+  };
 
   return (
     <div
@@ -132,7 +170,7 @@ function TvBoard({
             type="button"
             className="rounded-full bg-white/10 px-3 py-2 text-sm font-bold"
             aria-label={t("tv.fullscreen")}
-            onClick={() => (browserFs ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {})}
+            onClick={toggleFullscreen}
           >
             {browserFs ? "⤡" : "⤢"}
           </button>

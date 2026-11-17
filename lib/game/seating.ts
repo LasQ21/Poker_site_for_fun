@@ -1,11 +1,26 @@
 /**
  * Table seating for home tournaments: random draw, late seating, table breaking, balancing and the
  * dealer button. Pure functions — the server persists the result.
+ *
+ * Button semantics: `SeatingTable.button` is the dealer seat of the hand ABOUT TO BE PLAYED. The host
+ * passes it (moveButton) after each hand, so between hands the small blind is the next occupied seat
+ * clockwise after the button and the big blind the one after that. Heads-up (button = small blind) is
+ * not special-cased: balancing never has to move a player off a two-player table — the empty table
+ * that would imply is broken first.
+ *
+ * Simplifications versus TDA rules, on purpose for a home game:
+ *  - balancing moves the player who would post the NEXT big blind on the biggest table (the BB of the
+ *    hand about to be played), so nobody skips or doubles up on blinds at their old table;
+ *  - every moved player (balancing, table break, late seat) gets a random free seat at the target
+ *    table — not the TDA "worst position" seat relative to that table's button.
  */
 
 export interface SeatingTable {
   no: number;
-  /** Seat number of the dealer button (may point at an empty seat: "dead button"). */
+  /**
+   * Seat number of the dealer of the hand about to be played (may point at an empty seat: "dead
+   * button"). Null until the table has players; assigned randomly then.
+   */
   button: number | null;
 }
 
@@ -92,7 +107,7 @@ export function nextOccupiedSeat(seats: number[], from: number | null): number |
   return seats.find((s) => s > from) ?? seats[0];
 }
 
-/** Moves the button of one table to the next occupied seat. */
+/** Moves the button of one table to the next occupied seat (the host calls this after each hand). */
 export function moveButton(state: SeatingState, players: SeatPlayer[], tableNo: number): SeatingState {
   return {
     ...state,
@@ -109,6 +124,7 @@ export function moveButton(state: SeatingState, players: SeatPlayer[], tableNo: 
  *  2. tables are broken while fewer tables would do (players go to the emptiest tables);
  *  3. tables are balanced (max − min ≤ 1): the player due to post the big blind next on the
  *     biggest table moves to the smallest one.
+ * Every moved/seated player gets a random free seat at the target table (not the TDA worst position).
  */
 export function reconcileSeating(state: SeatingState, input: SeatPlayer[], rand: Rand = Math.random): SeatingResult {
   const per = state.seatsPerTable;
@@ -174,6 +190,8 @@ export function reconcileSeating(state: SeatingState, input: SeatPlayer[], rand:
     const big = sorted[0];
     const small = sorted[sorted.length - 1];
     if (sizeOf(big.no) - sizeOf(small.no) <= 1) break;
+    // The mover is the big blind of the hand about to be played (button = its dealer). A table
+    // opened in step 1 has no button yet: then the "blinds" are simply its lowest occupied seats.
     const seats = occupied(players, big.no);
     const sb = nextOccupiedSeat(seats, big.button);
     const bbSeat = nextOccupiedSeat(seats, sb);

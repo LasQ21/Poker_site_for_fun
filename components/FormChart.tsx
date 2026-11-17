@@ -1,13 +1,15 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fmtBuyins, fmtDate } from "@/lib/format";
 import type { PlayerStats } from "@/lib/game/stats";
 
 /** Cumulative result in buy-ins over the player's games. */
 export default function FormChart({ timeline, height = 200 }: { timeline: PlayerStats["timeline"]; height?: number }) {
+  const t = useT();
   if (timeline.length < 2) {
-    return <div className="px-4 py-8 text-center text-sm text-hint">Графік з&apos;явиться після двох завершених ігор.</div>;
+    return <div className="px-4 py-8 text-center text-sm text-hint">{t("form.empty")}</div>;
   }
   const data = [{ i: 0, t: timeline[0].t, total: 0, net: 0 }, ...timeline.map((p, i) => ({ i: i + 1, ...p }))];
   const up = timeline[timeline.length - 1].total >= 0;
@@ -28,7 +30,7 @@ export default function FormChart({ timeline, height = 200 }: { timeline: Player
           <ReferenceLine y={0} stroke="var(--app-hint)" strokeDasharray="3 3" />
           <Tooltip
             labelFormatter={(_, p) => (p?.[0]?.payload?.i ? `${p[0].payload.i}. ${fmtDate(new Date(p[0].payload.t))}` : "")}
-            formatter={(v) => [fmtBuyins(Number(v)), "разом"]}
+            formatter={(v) => [fmtBuyins(Number(v)), t("form.total")]}
             contentStyle={{ background: "var(--app-section)", border: "1px solid var(--app-separator)", borderRadius: 12, fontSize: 12 }}
             labelStyle={{ color: "var(--app-hint)" }}
           />

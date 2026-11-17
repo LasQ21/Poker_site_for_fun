@@ -8,6 +8,6 @@ export const dynamic = "force-dynamic";
 /** Join a game by its 4-digit code. */
 export const POST = route(async (req: Request) => {
   const viewer = await requireViewer();
-  const { code } = z.object({ code: z.string().regex(/^\d{4}$/, "Код гри — це 4 цифри") }).parse(await req.json());
+  const { code } = z.object({ code: z.string().regex(/^\d{4}$/, "errors.codeFormat") }).parse(await req.json());
   return json(await joinByCode(viewer, code));
 });

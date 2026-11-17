@@ -39,8 +39,9 @@ import { fmtBuyins, fmtChips, fmtSigned } from "@/lib/format";
 import { miniAppLink } from "@/lib/config";
 import { scheduleJob } from "@/lib/qstash";
 import { escapeHtml, notifyChat, urlButton } from "@/lib/telegram/api";
+import { localeOf, translate, type Lang } from "@/lib/i18n";
 import { AppError, badRequest, forbidden, notFound } from "./errors";
-import { displayNameOf } from "./users";
+import { displayNameOf, langOfUser } from "./users";
 
 export type BuyinKind = "buyin" | "rebuy" | "addon";
 
@@ -101,7 +102,7 @@ export async function assignJoinCode(gameId: string): Promise<string> {
       .from(games)
       .where(and(eq(games.status, "active"), isNotNull(games.joinCode)));
     const used = new Set(rows.map((r) => r.code));
-    if (used.size >= 8000) throw new AppError(503, "Забагато активних ігор, спробуйте пізніше");
+    if (used.size >= 8000) throw new AppError(503, "errors.tooManyGames");
     let code: string;
     do code = String(randomInt(1000, 10000));
     while (used.has(code));
@@ -112,12 +113,12 @@ export async function assignJoinCode(gameId: string): Promise<string> {
       if (!isUniqueViolation(e)) throw e;
     }
   }
-  throw new AppError(503, "Не вдалося згенерувати код гри");
+  throw new AppError(503, "errors.codeGenFailed");
 }
 
 export async function findActiveGameByCode(code: string): Promise<Game> {
   const c = code.trim();
-  if (!JOIN_CODE_RE.test(c)) throw badRequest("Код гри — це 4 цифри");
+  if (!JOIN_CODE_RE.test(c)) throw badRequest("errors.codeFormat");
   const [g] = await db
     .select()
     .from(games)
@@ -125,7 +126,7 @@ export async function findActiveGameByCode(code: string): Promise<Game> {
       and(eq(games.joinCode, c), eq(games.status, "active"), gt(games.updatedAt, new Date(Date.now() - IDLE_MS))),
     )
     .limit(1);
-  if (!g) throw notFound("Гру з таким кодом не знайдено (або її вже завершено)");
+  if (!g) throw notFound("errors.codeNotFound");
   return g;
 }
 
@@ -140,7 +141,7 @@ export async function findGameByCodeLimited(userId: number, code: string): Promi
     .from(joinAttempts)
     .where(and(eq(joinAttempts.userId, userId), gt(joinAttempts.createdAt, new Date(Date.now() - JOIN_WINDOW_MS))));
   if (Number(fails) >= JOIN_MAX_FAILS) {
-    throw new AppError(429, "Забагато невдалих спроб. Спробуйте за 10 хвилин");
+    throw new AppError(429, "errors.tooManyAttempts");
   }
   try {
     return await findActiveGameByCode(code);
@@ -176,7 +177,7 @@ export async function joinByCode(actor: User, code: string) {
 
 export async function getGame(gameId: string, q: DbOrTx = db): Promise<Game> {
   const [g] = await q.select().from(games).where(eq(games.id, gameId)).limit(1);
-  if (!g) throw notFound("Гру не знайдено");
+  if (!g) throw notFound("errors.gameNotFound");
   return g;
 }
 
@@ -186,7 +187,7 @@ async function getPlayer(q: DbOrTx, gameId: string, playerId: number): Promise<P
     .from(players)
     .where(and(eq(players.id, playerId), eq(players.gameId, gameId)))
     .limit(1);
-  if (!p) throw notFound("Гравця не знайдено");
+  if (!p) throw notFound("errors.playerNotFound");
   return p;
 }
 
@@ -271,7 +272,7 @@ export async function loadGameState(gameId: string, q: DbOrTx = db): Promise<Gam
 
   return {
     game,
-    host: { id: game.hostUserId, name: hostRow ? displayNameOf(hostRow) : "Хост" },
+    host: { id: game.hostUserId, name: hostRow ? displayNameOf(hostRow) : translate("uk", "msg.defaultHost") },
     chat: chatRow ? { title: chatRow.title, publicId: chatRow.publicId } : null,
     players: pviews,
     buyins: blist,
@@ -304,17 +305,17 @@ export function isHost(game: Game, userId: number | null | undefined) {
 }
 
 function assertHost(game: Game, actor: User) {
-  if (!isHost(game, actor.id)) throw forbidden("Це може зробити лише хост гри");
+  if (!isHost(game, actor.id)) throw forbidden("errors.hostOnly");
 }
 
 function assertActive(game: Game) {
-  if (game.status !== "active") throw badRequest("Гру вже завершено");
+  if (game.status !== "active") throw badRequest("errors.gameFinished");
 }
 
 function assertCanEditPlayer(game: Game, player: Player, actor: User) {
   if (isHost(game, actor.id)) return;
   if (player.userId != null && player.userId === actor.id) return;
-  throw forbidden("Можна змінювати лише свій стек");
+  throw forbidden("errors.ownStackOnly");
 }
 
 // ---------------------------------------------------------------- mutation helper
@@ -337,12 +338,16 @@ async function mutateGame<T>(gameId: string, fn: (m: Mutation) => Promise<T>): P
   const effects: Effect[] = [];
   const result = await db.transaction(async (tx) => {
     const [game] = await tx.select().from(games).where(eq(games.id, gameId)).for("update");
-    if (!game) throw notFound("Гру не знайдено");
+    if (!game) throw notFound("errors.gameNotFound");
     const out = await fn({ tx, game, after: (e) => effects.push(e) });
     const seatMoves = await reconcileGameSeating(tx, gameId);
-    if (seatMoves?.text && seatMoves.chatId) {
-      const { chatId, text } = seatMoves;
-      effects.push(() => notifyChat(chatId, text));
+    if (seatMoves?.lines.length && seatMoves.chatId) {
+      const { chatId, lines } = seatMoves;
+      effects.push(async () => {
+        const lang = await langOfUser(game.hostUserId);
+        const text = [translate(lang, "msg.seatingMoves"), ...lines.map((l) => seatLine(lang, l.name, l.move))].join("\n");
+        await notifyChat(chatId, text);
+      });
     }
     await tx
       .update(games)
@@ -381,7 +386,7 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
       .from(chatMembers)
       .where(and(eq(chatMembers.chatId, input.chatId), eq(chatMembers.userId, actor.id)))
       .limit(1);
-    if (!m) throw forbidden("Ви не учасник цієї групи");
+    if (!m) throw forbidden("errors.notGroupMember");
   }
   const season =
     input.chatId != null
@@ -397,13 +402,16 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
 
   const template = input.blindTemplate ?? (input.type === "cash" ? "cash" : "regular");
   const structure = input.blindStructure?.length ? input.blindStructure : buildStructure(template, input.startingStack);
-  const date = new Date().toLocaleDateString("uk-UA", { day: "numeric", month: "short" });
+  const lang = await langOfUser(actor.id);
+  const date = new Date().toLocaleDateString(localeOf(lang), { day: "numeric", month: "short" });
   const game = await db.transaction(async (tx) => {
     const [g] = await tx
       .insert(games)
       .values({
         id: newGameId(),
-        name: input.name?.trim() || `${input.type === "cash" ? "Кеш" : "Турнір"} ${date}`,
+        name:
+          input.name?.trim() ||
+          translate(lang, "msg.defaultName", { type: translate(lang, input.type === "cash" ? "common.cash" : "common.tournament"), date }),
         chatId: input.chatId ?? null,
         seasonId: season?.id ?? null,
         hostUserId: actor.id,
@@ -441,7 +449,7 @@ export async function updateGame(gameId: string, actor: User, input: UpdateGameI
     if (input.name !== undefined) patch.name = input.name.trim().slice(0, 80) || game.name;
     if (input.startingStack !== undefined) patch.startingStack = input.startingStack;
     if (input.blindStructure !== undefined) {
-      if (!input.blindStructure.length) throw badRequest("Структура блайндів порожня");
+      if (!input.blindStructure.length) throw badRequest("errors.emptyStructure");
       patch.blindStructure = input.blindStructure;
       patch.blindLevel = Math.min(game.blindLevel, input.blindStructure.length - 1);
       patch.timerVersion = game.timerVersion + 1;
@@ -497,7 +505,7 @@ export async function addPlayer(gameId: string, actor: User, displayName: string
     assertHost(game, actor);
     assertActive(game);
     const name = displayName.trim();
-    if (!name) throw badRequest("Вкажіть ім'я");
+    if (!name) throw badRequest("errors.nameRequired");
     const [p] = await insertPlayers(tx, game, [{ name, userId: null }], actor.id);
     return p;
   });
@@ -512,10 +520,10 @@ export async function joinGame(gameId: string, actor: User, playerId?: number) {
       .from(players)
       .where(and(eq(players.gameId, gameId), eq(players.userId, actor.id)))
       .limit(1);
-    if (existing) throw badRequest("Ви вже в цій грі");
+    if (existing) throw badRequest("errors.alreadyInGame");
     if (playerId != null) {
       const p = await getPlayer(tx, gameId, playerId);
-      if (p.userId != null) throw badRequest("Це місце вже зайняте");
+      if (p.userId != null) throw badRequest("errors.seatTaken");
       const [updated] = await tx.update(players).set({ userId: actor.id }).where(eq(players.id, playerId)).returning();
       return updated;
     }
@@ -538,13 +546,13 @@ export async function updatePlayer(
     const patch: Partial<Player> = {};
     if (input.displayName !== undefined) {
       const n = input.displayName.trim().slice(0, 40);
-      if (!n) throw badRequest("Вкажіть ім'я");
+      if (!n) throw badRequest("errors.nameRequired");
       patch.displayName = n;
     }
     if (input.unlink) patch.userId = null;
     if (input.status && input.status !== player.status) {
       // Status decides places and points, so only the host may change it (players use bust/rebuy).
-      if (!host) throw forbidden("Статус гравця змінює лише хост");
+      if (!host) throw forbidden("errors.statusHostOnly");
       assertActive(game);
       patch.status = input.status;
       if (input.status === "active") Object.assign(patch, { finishPlace: null, bustedAt: null });
@@ -568,7 +576,7 @@ export async function setStack(gameId: string, playerId: number, actor: User, ch
     assertActive(game);
     const player = await getPlayer(tx, gameId, playerId);
     assertCanEditPlayer(game, player, actor);
-    if (!Number.isInteger(chips) || chips < 0) throw badRequest("Стек має бути невід'ємним цілим числом");
+    if (!Number.isInteger(chips) || chips < 0) throw badRequest("errors.stackInvalid");
     await tx.insert(stackSnapshots).values({ gameId, playerId, chips, recordedBy: actor.id });
     if (player.status === "busted" && chips > 0 && game.type === "cash") {
       await tx.update(players).set({ status: "active" }).where(eq(players.id, playerId));
@@ -582,7 +590,7 @@ export async function addBuyin(gameId: string, playerId: number, actor: User, ki
     const player = await getPlayer(tx, gameId, playerId);
     assertCanEditPlayer(game, player, actor);
     const amount = chips ?? game.startingStack;
-    if (!Number.isInteger(amount) || amount <= 0) throw badRequest("Сума бай-іну має бути додатною");
+    if (!Number.isInteger(amount) || amount <= 0) throw badRequest("errors.buyinInvalid");
     const stack = (await currentStack(tx, playerId)) + amount;
     await tx.insert(buyins).values({ gameId, playerId, chips: amount, kind, createdBy: actor.id });
     await tx.insert(stackSnapshots).values({ gameId, playerId, chips: stack, recordedBy: actor.id });
@@ -603,12 +611,12 @@ export async function deleteBuyin(gameId: string, buyinId: number, actor: User) 
       .from(buyins)
       .where(and(eq(buyins.id, buyinId), eq(buyins.gameId, gameId)))
       .limit(1);
-    if (!b) throw notFound("Бай-ін не знайдено");
+    if (!b) throw notFound("errors.buyinNotFound");
     const [{ count }] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(buyins)
       .where(eq(buyins.playerId, b.playerId));
-    if (Number(count) <= 1) throw badRequest("Це єдиний бай-ін гравця — щоб прибрати його, видаліть гравця");
+    if (Number(count) <= 1) throw badRequest("errors.onlyBuyin");
     const current = await currentStack(tx, b.playerId);
     await tx.delete(buyins).where(eq(buyins.id, buyinId));
     await tx
@@ -623,7 +631,7 @@ export async function bustPlayer(gameId: string, playerId: number, actor: User) 
     assertActive(game);
     const player = await getPlayer(tx, gameId, playerId);
     assertCanEditPlayer(game, player, actor);
-    if (player.status !== "active") throw badRequest("Гравець уже вибув");
+    if (player.status !== "active") throw badRequest("errors.alreadyBusted");
     // Counted under the game lock, so two simultaneous eliminations get different places.
     const [{ count }] = await tx
       .select({ count: sql<number>`count(*)::int` })
@@ -637,13 +645,14 @@ export async function bustPlayer(gameId: string, playerId: number, actor: User) 
     await tx.insert(stackSnapshots).values({ gameId, playerId, chips: 0, recordedBy: actor.id });
     if (game.type === "tournament" && game.chatId) {
       const left = Number(count) - 1;
-      after(() =>
-        notifyChat(
+      after(async () => {
+        const lang = await langOfUser(game.hostUserId);
+        await notifyChat(
           game.chatId,
-          `💥 <b>${escapeHtml(player.displayName)}</b> вибуває — ${place}-е місце.` +
-            (left === 1 ? "\n🏆 Залишився один гравець — хост може завершити турнір." : ` У грі ще ${left}.`),
-        ),
-      );
+          translate(lang, "msg.bust", { name: escapeHtml(player.displayName), place }) +
+            (left === 1 ? translate(lang, "msg.lastOne") : translate(lang, "msg.left", { n: left })),
+        );
+      });
     }
     return { place };
   });
@@ -671,9 +680,11 @@ async function writeSeats(q: DbOrTx, gameId: string, moves: { playerId: number; 
     .where(and(eq(players.gameId, gameId), inArray(players.id, moves.map((m) => m.playerId))));
 }
 
-function seatLine(name: string, m: SeatMove) {
-  const to = `стіл ${m.to.tableNo}, місце ${m.to.seatNo}`;
-  return m.from ? `• ${escapeHtml(name)}: ${to} (був стіл ${m.from.tableNo})` : `• ${escapeHtml(name)} сідає: ${to}`;
+function seatLine(lang: Lang, name: string, m: SeatMove) {
+  const to = translate(lang, "msg.seatTo", { t: m.to.tableNo, s: m.to.seatNo });
+  return m.from
+    ? translate(lang, "msg.seatMoved", { name: escapeHtml(name), to, from: m.from.tableNo })
+    : translate(lang, "msg.seatNew", { name: escapeHtml(name), to });
 }
 
 /**
@@ -700,11 +711,11 @@ async function reconcileGameSeating(tx: Tx, gameId: string) {
   const names = new Map(plist.map((p) => [p.id, p.name]));
   const moved = r.moves.filter((m) => m.from && m.from.tableNo !== m.to.tableNo);
   const seated = r.moves.filter((m) => !m.from);
-  const lines = [...moved, ...seated].map((m) => seatLine(names.get(m.playerId) ?? "?", m));
-  return { chatId: g.chatId, text: lines.length ? `🔀 <b>Пересадка</b>\n${lines.join("\n")}` : "" };
+  const lines = [...moved, ...seated].map((m) => ({ name: names.get(m.playerId) ?? "?", move: m }));
+  return { chatId: g.chatId, lines };
 }
 
-export function seatingText(state: GameState): string {
+export function seatingText(state: GameState, lang: Lang): string {
   const t = state.game.tables;
   if (!t) return "";
   return t.tables
@@ -713,7 +724,7 @@ export function seatingText(state: GameState): string {
         .filter((p) => p.status === "active" && p.tableNo === table.no && p.seatNo != null)
         .sort((a, b) => a.seatNo! - b.seatNo!)
         .map((p) => `  ${p.seatNo}. ${escapeHtml(p.displayName)}${p.seatNo === table.button ? " 🔘" : ""}`);
-      return `<b>Стіл ${table.no}</b>\n${seated.join("\n")}`;
+      return `${translate(lang, "msg.tableTitle", { n: table.no })}\n${seated.join("\n")}`;
     })
     .join("\n\n");
 }
@@ -723,13 +734,13 @@ export async function seatRandom(gameId: string, actor: User, seatsPerTable: num
   await mutateGame(gameId, async ({ tx, game, after }) => {
     assertHost(game, actor);
     assertActive(game);
-    if (seatsPerTable < MIN_SEATS || seatsPerTable > MAX_SEATS) throw badRequest(`Місць за столом: ${MIN_SEATS}–${MAX_SEATS}`);
+    if (seatsPerTable < MIN_SEATS || seatsPerTable > MAX_SEATS) throw badRequest("errors.seatsRange", { min: MIN_SEATS, max: MAX_SEATS });
     const plist = await tx
       .select({ id: players.id, status: players.status })
       .from(players)
       .where(eq(players.gameId, gameId));
     const activeIds = plist.filter((p) => p.status === "active").map((p) => p.id);
-    if (activeIds.length < 2) throw badRequest("Для розсадки потрібно щонайменше двоє гравців у грі");
+    if (activeIds.length < 2) throw badRequest("errors.seatingNeedsPlayers");
     const r = randomSeating(activeIds, seatsPerTable);
     const seats = new Map(r.moves.map((m) => [m.playerId, m.to]));
     await writeSeats(
@@ -740,8 +751,8 @@ export async function seatRandom(gameId: string, actor: User, seatsPerTable: num
     await tx.update(games).set({ tables: r.state }).where(eq(games.id, gameId));
     if (game.chatId) {
       after(async () => {
-        const state = await loadGameState(gameId);
-        await notifyChat(game.chatId, `🪑 <b>Розсадка</b> · ${escapeHtml(game.name)}\n\n${seatingText(state)}`);
+        const [state, lang] = await Promise.all([loadGameState(gameId), langOfUser(game.hostUserId)]);
+        await notifyChat(game.chatId, `${translate(lang, "msg.seatingDraw", { name: escapeHtml(game.name) })}\n\n${seatingText(state, lang)}`);
       });
     }
   });
@@ -754,8 +765,8 @@ export async function moveDealerButton(gameId: string, actor: User, tableNo: num
     assertActive(game);
     const current = await tx.select({ tables: games.tables }).from(games).where(eq(games.id, gameId));
     const tables = current[0]?.tables;
-    if (!tables) throw badRequest("Спершу розсадіть гравців");
-    if (!tables.tables.some((t) => t.no === tableNo)) throw notFound("Стіл не знайдено");
+    if (!tables) throw badRequest("errors.seatFirst");
+    if (!tables.tables.some((t) => t.no === tableNo)) throw notFound("errors.tableNotFound");
     const plist = await tx
       .select({ id: players.id, status: players.status, tableNo: players.tableNo, seatNo: players.seatNo })
       .from(players)
@@ -774,7 +785,7 @@ export async function rebalanceTables(gameId: string, actor: User) {
   await mutateGame(gameId, async ({ game }) => {
     assertHost(game, actor);
     assertActive(game);
-    if (!game.tables) throw badRequest("Спершу розсадіть гравців");
+    if (!game.tables) throw badRequest("errors.seatFirst");
   });
 }
 
@@ -803,18 +814,20 @@ export async function timerAction(gameId: string, actor: User, action: TimerActi
       await scheduleBlindJob(updated);
       if ((action === "next" || action === "prev") && updated.chatId) {
         const v = computeTimer(updated.blindStructure, updated, now);
-        if (v.status === "running") await notifyChat(updated.chatId, levelMessage(updated, v.levelIndex));
+        if (v.status === "running") await notifyChat(updated.chatId, levelMessage(updated, v.levelIndex, await langOfUser(updated.hostUserId)));
       }
     });
     return updated;
   });
 }
 
-export function levelMessage(game: Game, levelIndex: number) {
+export function levelMessage(game: Game, levelIndex: number, lang: Lang) {
   const level = game.blindStructure[levelIndex];
   if (!level) return "";
-  const head = level.isBreak ? "☕ <b>Перерва</b>" : `⏫ <b>Рівень ${playingLevelNumber(game.blindStructure, levelIndex)}</b>: ${formatBlinds(level)}`;
-  const mins = level.minutes ? ` · ${level.minutes} хв` : "";
+  const head = level.isBreak
+    ? translate(lang, "msg.break")
+    : translate(lang, "msg.level", { n: playingLevelNumber(game.blindStructure, levelIndex), blinds: formatBlinds(level, lang) });
+  const mins = level.minutes ? translate(lang, "msg.levelMinutes", { n: level.minutes }) : "";
   return `${head}${mins}\n<i>${escapeHtml(game.name)}</i>`;
 }
 
@@ -841,7 +854,8 @@ export async function handleBlindJob(body: { gameId: string; version: number; le
   const v = computeTimer(game.blindStructure, game, new Date());
   if (v.status !== "running") return "not-running";
   if (v.levelIndex >= body.level) {
-    await notifyChat(game.chatId, levelMessage(game, v.levelIndex), urlButton("⏱ Таймер", miniAppLink(game.id)));
+    const lang = await langOfUser(game.hostUserId);
+    await notifyChat(game.chatId, levelMessage(game, v.levelIndex, lang), urlButton(translate(lang, "msg.timerBtn"), miniAppLink(game.id)));
   }
   await scheduleBlindJob(game);
   return "ok";
@@ -867,10 +881,11 @@ export async function handleReminderJob(body: { gameId: string; version: number 
   }
   if (Date.now() - game.createdAt.getTime() > REMINDER_MAX_AGE_MS) return "expired";
   const state = await loadGameState(game.id);
+  const lang = await langOfUser(game.hostUserId);
   await notifyChat(
     game.chatId,
-    `🔔 Час оновити стеки! <i>${escapeHtml(game.name)}</i>\n\n${standingsText(state)}\n\nНапишіть <code>/stack 12500</code> або відкрийте застосунок.`,
-    urlButton("🃏 Оновити стек", miniAppLink(game.id)),
+    translate(lang, "msg.reminder", { name: escapeHtml(game.name), standings: standingsText(state, lang) }),
+    urlButton(translate(lang, "msg.updateStackBtn"), miniAppLink(game.id)),
   );
   await scheduleReminder(game);
   return "ok";
@@ -930,7 +945,7 @@ export async function endGame(gameId: string, actor: User, finalStacks?: Record<
 export async function reopenGame(gameId: string, actor: User) {
   await mutateGame(gameId, async ({ tx, game }) => {
     assertHost(game, actor);
-    if (game.status !== "finished") throw badRequest("Гра ще триває");
+    if (game.status !== "finished") throw badRequest("errors.gameStillActive");
     await tx.update(games).set({ status: "active", finishedAt: null, joinCode: null }).where(eq(games.id, gameId));
     await tx.update(players).set({ finalChips: null }).where(eq(players.gameId, gameId));
     if (game.type === "tournament") {
@@ -945,7 +960,7 @@ export async function reopenGame(gameId: string, actor: User) {
 
 // ---------------------------------------------------------------- text summaries (bot)
 
-export function standingsText(state: GameState): string {
+export function standingsText(state: GameState, lang: Lang): string {
   const { game } = state;
   const lines = state.results.map((r) => {
     const p = state.players.find((x) => x.id === r.playerId)!;
@@ -957,41 +972,43 @@ export function standingsText(state: GameState): string {
     return `  ${r.place}. ${name} — ${fmtChips(r.finalChips)} (${fmtSigned(r.netChips)})`;
   });
   const diff = state.check.diff;
-  const warn = diff !== 0 ? `\n⚠️ Розбіжність фішок: ${fmtSigned(diff)}` : "";
-  return (lines.join("\n") || "  поки нікого") + warn;
+  const warn = diff !== 0 ? translate(lang, "msg.chipDiff", { diff: fmtSigned(diff) }) : "";
+  return (lines.join("\n") || translate(lang, "msg.nobodyYet")) + warn;
 }
 
-export function summaryText(state: GameState): string {
+export function summaryText(state: GameState, lang: Lang): string {
   const { game } = state;
   const medals = ["🥇", "🥈", "🥉"];
   const lines = state.results.map((r) => {
     const m = medals[r.place - 1] ?? `${r.place}.`;
     const name = escapeHtml(r.displayName);
-    if (game.type === "tournament") return `${m} ${name} — ${r.points} очк.`;
-    return `${m} ${name}: ${fmtSigned(r.netChips)} (${fmtBuyins(r.netBuyins)})`;
+    if (game.type === "tournament") return `${m} ${name} — ${translate(lang, "common.pointsShort", { n: r.points ?? 0 })}`;
+    return `${m} ${name}: ${fmtSigned(r.netChips)} (${fmtBuyins(r.netBuyins, lang)})`;
   });
-  const totalBuyins = state.players.reduce((s, p) => s + p.buyinCount, 0);
+  const n = state.players.reduce((s, p) => s + p.buyinCount, 0);
+  const type = translate(lang, game.type === "cash" ? "common.cash" : "common.tournament");
   return (
-    `🏁 <b>${escapeHtml(game.name)}</b> завершено\n` +
-    `${game.type === "cash" ? "Кеш" : "Турнір"} · ${state.players.length} гравців · ${totalBuyins} бай-інів\n\n` +
+    `${translate(lang, "msg.finished", { name: escapeHtml(game.name) })}\n` +
+    `${type} · ${translate(lang, "common.players", { n: state.players.length })} · ${translate(lang, "common.buyins", { n })}\n\n` +
     lines.join("\n")
   );
 }
 
 /** `includeIds`: Telegram user ids are only for the game's own participants, not anonymous visitors. */
-export function gameCsv(state: GameState, opts: { includeIds?: boolean } = {}): string {
+export function gameCsv(state: GameState, opts: { includeIds?: boolean; lang?: Lang } = {}): string {
   const { game } = state;
   const ids = opts.includeIds !== false;
+  const t = (k: Parameters<typeof translate>[1]) => translate(opts.lang ?? "uk", k);
   const header = [
-    "Місце",
-    "Гравець",
-    ...(ids ? ["Telegram ID"] : []),
-    "Бай-інів",
-    "Бай-іни (фішки)",
-    "Фінальний стек",
-    "Результат (фішки)",
-    "Результат (бай-іни)",
-    "Очки",
+    t("csv.place"),
+    t("csv.player"),
+    ...(ids ? [t("csv.tgId")] : []),
+    t("csv.buyins"),
+    t("csv.buyinChips"),
+    t("csv.final"),
+    t("csv.netChips"),
+    t("csv.netBuyins"),
+    t("csv.points"),
   ];
   const rows = state.results.map((r) => [
     r.place,
@@ -1005,14 +1022,14 @@ export function gameCsv(state: GameState, opts: { includeIds?: boolean } = {}): 
     r.points ?? "",
   ]);
   const meta = [
-    ["Гра", game.name],
-    ["Тип", game.type === "cash" ? "Кеш" : "Турнір"],
-    ["Стартовий стек", game.startingStack],
-    ["Створено", game.createdAt.toISOString()],
-    ["Завершено", game.finishedAt?.toISOString() ?? ""],
+    [t("csv.game"), game.name],
+    [t("csv.type"), t(game.type === "cash" ? "common.cash" : "common.tournament")],
+    [t("csv.startStack"), game.startingStack],
+    [t("csv.created"), game.createdAt.toISOString()],
+    [t("csv.finishedAt"), game.finishedAt?.toISOString() ?? ""],
     [],
   ];
-  return "﻿" + [...meta, header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return "\uFEFF" + [...meta, header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
 function csvCell(v: unknown): string {

@@ -1,11 +1,13 @@
 "use client";
 
-import { fmtDate, fmtDateTime, pluralUk } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import type { GameListItemDTO } from "@/lib/types";
 import { IconChevron } from "./icons";
 import { Badge, Row } from "./ui";
 
 export function GameList({ games, summaryLinks }: { games: GameListItemDTO[]; summaryLinks?: boolean }) {
+  const t = useT();
   return (
     <>
       {games.map((g) => (
@@ -19,13 +21,12 @@ export function GameList({ games, summaryLinks }: { games: GameListItemDTO[]; su
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="truncate font-bold">{g.name}</span>
-              {g.status === "active" && <Badge tone="pos">триває</Badge>}
-              {g.isHost && <Badge>хост</Badge>}
+              {g.status === "active" && <Badge tone="pos">{t("common.live")}</Badge>}
+              {g.isHost && <Badge>{t("common.host")}</Badge>}
             </div>
             <div className="truncate text-[13px] font-medium text-hint">
-              {g.status === "finished" ? fmtDate(g.finishedAt) : fmtDateTime(g.createdAt)}, {g.playerCount}{" "}
-              {pluralUk(g.playerCount, "гравець", "гравці", "гравців")}
-              {g.chatTitle ? ` у «${g.chatTitle}»` : ""}
+              {g.status === "finished" ? fmtDate(g.finishedAt) : fmtDateTime(g.createdAt)}, {t("common.players", { n: g.playerCount })}
+              {g.chatTitle ? t("list.inChat", { chat: g.chatTitle }) : ""}
             </div>
             {g.winner && <div className="truncate text-[13px] font-semibold text-gold">🏆 {g.winner}</div>}
           </div>

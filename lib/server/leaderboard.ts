@@ -18,7 +18,7 @@ export interface LeaderboardData {
 
 export async function chatByPublicId(publicId: string): Promise<Chat> {
   const [c] = await db.select().from(chats).where(eq(chats.publicId, publicId)).limit(1);
-  if (!c) throw notFound("Групу не знайдено");
+  if (!c) throw notFound("errors.chatNotFound");
   return c;
 }
 
@@ -35,7 +35,7 @@ export async function activeSeason(chatId: number): Promise<Season | null> {
 /** `seasonId`: a season id, "current" (active season or all-time if none) or "all". */
 export async function loadLeaderboard(chatId: number, seasonId: number | "current" | "all"): Promise<LeaderboardData> {
   const [chat] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
-  if (!chat) throw notFound("Групу не знайдено");
+  if (!chat) throw notFound("errors.chatNotFound");
   const allSeasons = await db.select().from(seasons).where(eq(seasons.chatId, chatId)).orderBy(desc(seasons.startsAt));
   let season: Season | null = null;
   if (seasonId === "current") season = allSeasons.find((s) => s.isActive) ?? null;
@@ -124,14 +124,14 @@ export async function canManageSeasons(chatId: number, userId: number): Promise<
 
 async function assertCanManageSeasons(chatId: number, userId: number) {
   if (!(await canManageSeasons(chatId, userId))) {
-    throw forbidden("Сезонами керують адміністратори групи або ті, хто проводив тут ігри");
+    throw forbidden("errors.seasonsForbidden");
   }
 }
 
 export async function startSeason(chatId: number, userId: number, name: string) {
   await assertCanManageSeasons(chatId, userId);
   const n = name.trim().slice(0, 60);
-  if (!n) throw badRequest("Вкажіть назву сезону");
+  if (!n) throw badRequest("errors.seasonNameRequired");
   return db.transaction(async (tx) => {
     await tx
       .update(seasons)

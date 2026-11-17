@@ -32,7 +32,7 @@ export const updateGameSchema = z.object({
 const pid = z.number().int().positive();
 
 export const actionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("addPlayer"), displayName: z.string().min(1, "Вкажіть ім'я").max(40) }),
+  z.object({ action: z.literal("addPlayer"), displayName: z.string().min(1, "errors.nameRequired").max(40) }),
   z.object({ action: z.literal("join"), playerId: pid.optional() }),
   z.object({
     action: z.literal("updatePlayer"),

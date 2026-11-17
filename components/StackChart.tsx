@@ -1,16 +1,18 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useMemo } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { fmtChips } from "@/lib/format";
+import { fmtChips, fmtTime } from "@/lib/format";
 import type { GameStateDTO } from "@/lib/types";
 import { playerColor } from "./StackTable";
 
-const time = (t: number) => new Date(t).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+const time = (t: number) => fmtTime(t);
 const compact = (n: number) => (Math.abs(n) >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n));
 
 /** Stack of every player over time; values carry forward between updates (step lines). */
 export default function StackChart({ state, height = 260 }: { state: GameStateDTO; height?: number }) {
+  const t = useT();
   const data = useMemo(() => {
     const cur: Record<string, number> = {};
     const rows: Record<string, number>[] = [];
@@ -27,7 +29,7 @@ export default function StackChart({ state, height = 260 }: { state: GameStateDT
   }, [state.snapshots, state.game.finishedAt, state.serverNow]);
 
   if (data.length < 2) {
-    return <div className="px-4 py-8 text-center text-sm text-hint">Графік з&apos;явиться після перших оновлень стеків.</div>;
+    return <div className="px-4 py-8 text-center text-sm text-hint">{t("chart.empty")}</div>;
   }
 
   return (

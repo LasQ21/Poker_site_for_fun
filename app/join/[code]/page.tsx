@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useMe, useToast } from "@/components/AppShell";
@@ -12,6 +13,7 @@ export default function JoinCodePage() {
   const { code } = useParams<{ code: string }>();
   const router = useRouter();
   const toast = useToast();
+  const t = useT();
   const { data: me, isLoading } = useMe();
   const [error, setError] = useState<string | null>(null);
   const started = useRef(false);
@@ -32,12 +34,12 @@ export default function JoinCodePage() {
   if (error)
     return (
       <Section>
-        <Empty icon="🔒" title={`Код ${code} не спрацював`}>
+        <Empty icon="🔒" title={t("join.failed", { code })}>
           {error}
         </Empty>
         <div className="px-4 pb-4">
           <LinkButton href="/" className="w-full">
-            На головну
+            {t("common.home")}
           </LinkButton>
         </div>
       </Section>

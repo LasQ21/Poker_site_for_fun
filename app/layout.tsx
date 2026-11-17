@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Manrope, Unbounded } from "next/font/google";
 import Script from "next/script";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
@@ -9,10 +10,13 @@ export const metadata: Metadata = {
   description: "Облік стеків у домашньому покері: кеш і турніри, таймер блайндів, графік і лідерборд.",
 };
 
+// Self-hosted at build time: no request to Google from Telegram's WebView, no render-blocking CSS.
+const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700", "800"], variable: "--font-manrope", display: "swap" });
+const unbounded = Unbounded({ subsets: ["latin", "cyrillic"], weight: ["500", "600", "700", "800"], variable: "--font-unbounded", display: "swap" });
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#e6ecea" },
@@ -22,16 +26,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="uk">
+    <html lang="uk" className={`${manrope.variable} ${unbounded.variable}`}>
       <head>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap"
-        />
       </head>
       <body className="min-h-dvh antialiased">
         {/* Lens used by .glass-pill / .glass-lens where backdrop-filter:url() is supported (Chromium). */}

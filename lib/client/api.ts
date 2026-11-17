@@ -1,5 +1,7 @@
 "use client";
 
+import { isKey } from "@/lib/i18n";
+import { tr } from "@/lib/i18n/client";
 import { getWebApp } from "./telegram";
 
 export class ApiError extends Error {
@@ -18,7 +20,10 @@ function authHeaders(): Record<string, string> {
 
 async function handle<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? `Помилка ${res.status}`);
+  if (!res.ok) {
+    const { error, code, params } = data as { error?: string; code?: string; params?: Record<string, string | number> };
+    throw new ApiError(res.status, isKey(code) ? tr(code, params) : (error ?? tr("common.error", { status: res.status })));
+  }
   return data as T;
 }
 

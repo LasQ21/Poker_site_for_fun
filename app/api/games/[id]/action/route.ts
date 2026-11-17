@@ -4,6 +4,8 @@ import { actionSchema } from "@/lib/server/schemas";
 import * as G from "@/lib/server/games";
 import { escapeHtml, notifyChat, sendCsv, urlButton } from "@/lib/telegram/api";
 import { ensureBotUsername, gameWebUrl } from "@/lib/config";
+import { translate } from "@/lib/i18n";
+import { langOfUser } from "@/lib/server/users";
 
 export const dynamic = "force-dynamic";
 
@@ -49,8 +51,14 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
     case "end": {
       const state = await G.endGame(id, viewer, a.finalStacks);
       if (state.game.chatId) {
-        await notifyChat(state.game.chatId, G.summaryText(state), urlButton("📊 Підсумок", `${gameWebUrl(id)}/summary`));
-        await sendCsv(state.game.chatId, `${state.game.name.replace(/[^\p{L}\p{N}_-]+/gu, "_")}.csv`, G.gameCsv(state), escapeHtml(state.game.name));
+        const lang = await langOfUser(state.game.hostUserId);
+        await notifyChat(state.game.chatId, G.summaryText(state, lang), urlButton(translate(lang, "msg.summaryBtn"), `${gameWebUrl(id)}/summary`));
+        await sendCsv(
+          state.game.chatId,
+          `${state.game.name.replace(/[^\p{L}\p{N}_-]+/gu, "_")}.csv`,
+          G.gameCsv(state, { lang }),
+          escapeHtml(state.game.name),
+        );
       }
       break;
     }

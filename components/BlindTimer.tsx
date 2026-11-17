@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { formatBlinds, formatClock, levelDurationMs, type TimerAction } from "@/lib/game/blinds";
 import { useTimer, unlockAudio } from "@/lib/client/timer";
 import { fmtChips } from "@/lib/format";
@@ -26,6 +27,7 @@ export function BlindTimer({
   onAction: (a: TimerAction) => void;
 }) {
   const v = useTimer(game, clockOffset);
+  const t = useT();
   const active = game.status === "active";
   const fixed = game.blindStructure.length === 1 && !Number.isFinite(levelDurationMs(game.blindStructure[0]));
 
@@ -34,11 +36,11 @@ export function BlindTimer({
       <div className="glass mb-5 flex items-center gap-4 rounded-[28px] px-4 py-3.5">
         <span className="chip h-12 w-12" style={{ ["--chip" as string]: "var(--felt)" }} />
         <div className="flex-1">
-          <div className="text-[13px] font-semibold text-hint">Блайнди</div>
+          <div className="text-[13px] font-semibold text-hint">{t("timer.blinds")}</div>
           <div className="font-display text-xl font-bold tabular">{formatBlinds(v.level)}</div>
         </div>
         <div className="text-right text-[13px] font-semibold text-hint">
-          стек {fmtChips(game.startingStack)}
+          {t("timer.stack", { n: fmtChips(game.startingStack) })}
           <br />
           {Math.round(game.startingStack / Math.max(1, v.level.bb))} BB
         </div>
@@ -50,12 +52,12 @@ export function BlindTimer({
   const progress = Number.isFinite(dur) ? Math.min(1, Math.max(0, 1 - v.remainingMs / dur)) : 0;
   const lastMinute = v.status === "running" && v.remainingMs < 60_000 && !!v.nextLevel;
   const ringColor = v.level.isBreak ? "var(--gold)" : lastMinute ? "var(--negative)" : "var(--app-link)";
-  const statusText = v.status === "running" ? "Йде" : v.status === "paused" ? "Пауза" : "Не запущено";
+  const statusText = t(v.status === "running" ? "timer.running" : v.status === "paused" ? "timer.paused" : "timer.idle");
 
   return (
     <div className="glass-lens glass mb-5 overflow-hidden rounded-[34px] px-4 pb-4 pt-3.5">
       <div className="flex items-center justify-between px-1 text-[13px] font-bold">
-        <span className="text-fg/80">{v.level.isBreak ? "Перерва" : `Рівень ${levelNo(game, v.levelIndex)}`}</span>
+        <span className="text-fg/80">{v.level.isBreak ? t("blinds.break") : t("timer.level", { n: levelNo(game, v.levelIndex) })}</span>
         <span className={`flex items-center gap-1.5 ${v.status === "running" ? "text-pos" : "text-hint"}`}>
           <span className={`h-2 w-2 rounded-full ${v.status === "running" ? "animate-pulse bg-pos" : "bg-hint/60"}`} />
           {statusText}
@@ -88,28 +90,28 @@ export function BlindTimer({
             {formatClock(v.remainingMs)}
           </div>
           <div className="mt-2 font-display text-[clamp(.95rem,4.4vw,1.15rem)] font-semibold tabular text-fg/85">
-            {v.level.isBreak ? "☕ перерва" : `${fmtChips(v.level.sb)} / ${fmtChips(v.level.bb)}`}
+            {v.level.isBreak ? t("timer.breakShort") : `${fmtChips(v.level.sb)} / ${fmtChips(v.level.bb)}`}
           </div>
-          {!v.level.isBreak && v.level.ante > 0 && <div className="mt-0.5 text-xs font-semibold text-hint">анте {fmtChips(v.level.ante)}</div>}
+          {!v.level.isBreak && v.level.ante > 0 && <div className="mt-0.5 text-xs font-semibold text-hint">{t("blinds.ante", { n: fmtChips(v.level.ante) })}</div>}
         </div>
       </div>
 
       <div className="mb-3 text-center text-[13px] font-semibold text-hint">
-        {v.nextLevel ? <>Далі {formatBlinds(v.nextLevel)}</> : "Останній рівень"}
+        {v.nextLevel ? t("timer.next", { blinds: formatBlinds(v.nextLevel) }) : t("timer.last")}
       </div>
 
       {isHost && active && (
         <div className="flex items-center justify-center gap-4">
-          <RoundBtn label="Попередній рівень" onClick={() => onAction("prev")} disabled={v.levelIndex === 0}>
+          <RoundBtn label={t("timer.prev")} onClick={() => onAction("prev")} disabled={v.levelIndex === 0}>
             <IconPrev width={20} height={20} />
           </RoundBtn>
           {v.status === "running" ? (
-            <RoundBtn label="Пауза" big onClick={() => onAction("pause")}>
+            <RoundBtn label={t("timer.pause")} big onClick={() => onAction("pause")}>
               <IconPause width={26} height={26} />
             </RoundBtn>
           ) : (
             <RoundBtn
-              label={v.status === "paused" ? "Продовжити" : "Старт"}
+              label={t(v.status === "paused" ? "timer.resume" : "timer.start")}
               big
               primary
               onClick={() => {
@@ -120,7 +122,7 @@ export function BlindTimer({
               <IconPlay width={26} height={26} />
             </RoundBtn>
           )}
-          <RoundBtn label="Наступний рівень" onClick={() => onAction("next")} disabled={!v.nextLevel}>
+          <RoundBtn label={t("timer.nextLevel")} onClick={() => onAction("next")} disabled={!v.nextLevel}>
             <IconNext width={20} height={20} />
           </RoundBtn>
         </div>

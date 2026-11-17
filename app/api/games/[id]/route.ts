@@ -15,7 +15,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = route(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
   const [probe, viewer] = await Promise.all([gameVersion(id), getViewer()]);
-  if (!probe) throw notFound("Гру не знайдено");
+  if (!probe) throw notFound("errors.gameNotFound");
   const headers = { "Cache-Control": "private, no-cache", Vary: "Authorization, Cookie" };
   const inm = req.headers.get("if-none-match");
   if (inm && inm === gameEtag(probe, viewer?.id)) {

@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatBlinds, formatClock, levelDurationMs, type TimerAction } from "@/lib/game/blinds";
 import { useAppBack } from "@/lib/client/nav";
+import { tr, useT } from "@/lib/i18n/client";
 import { exitFullscreen, getWebApp, isFullscreen, requestFullscreen, useBackButton } from "@/lib/client/telegram";
 import { unlockAudio, useTimer } from "@/lib/client/timer";
 import { useGame } from "@/lib/client/useGame";
@@ -57,7 +58,7 @@ export default function TvPage() {
   useMiniAppFullscreen();
 
   if (isLoading) return <PageLoader />;
-  if (error || !state) return <Empty icon="🤷" title="Гру не знайдено">{error?.message}</Empty>;
+  if (error || !state) return <Empty icon="🤷" title={tr("errors.gameNotFound")}>{error?.message}</Empty>;
   return <TvBoard state={state} clockOffset={clockOffset} act={act} onExit={back} />;
 }
 
@@ -74,6 +75,7 @@ function TvBoard({
 }) {
   const { game } = state;
   const toast = useToast();
+  const t = useT();
   const v = useTimer(game, clockOffset);
   const [browserFs, setBrowserFs] = useState(false);
   const host = state.role === "host" && game.status === "active";
@@ -115,13 +117,13 @@ function TvBoard({
         <div className="min-w-0 flex-1">
           <div className="font-display truncate text-[clamp(1rem,2.4vw,1.6rem)] font-bold">{game.name}</div>
           <div className="text-[clamp(.75rem,1.4vw,1rem)] font-semibold text-white/60">
-            {v.level.isBreak ? "Перерва" : `Рівень ${levelNo}`} · {alive.length}/{state.players.length} у грі
-            {avg > 0 && ` · середній стек ${fmtChips(avg)}${bb ? ` (${Math.round(avg / bb)} BB)` : ""}`}
+            {v.level.isBreak ? t("blinds.break") : t("timer.level", { n: levelNo })} · {t("tv.inGame", { alive: alive.length, total: state.players.length })}
+            {avg > 0 && ` · ${t("tv.avg", { n: fmtChips(avg) })}${bb ? ` (${Math.round(avg / bb)} BB)` : ""}`}
           </div>
         </div>
         {game.joinCode && game.status === "active" && !state.idle && (
           <div className="text-right">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-white/50">код гри</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-white/50">{t("tv.code")}</div>
             <div className="font-display text-[clamp(1.2rem,3vw,2rem)] font-bold leading-none tracking-[0.15em]">{game.joinCode}</div>
           </div>
         )}
@@ -129,12 +131,13 @@ function TvBoard({
           <button
             type="button"
             className="rounded-full bg-white/10 px-3 py-2 text-sm font-bold"
+            aria-label={t("tv.fullscreen")}
             onClick={() => (browserFs ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {})}
           >
             {browserFs ? "⤡" : "⤢"}
           </button>
         )}
-        <button type="button" aria-label="Вийти з ТВ-режиму" onClick={onExit} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-lg">
+        <button type="button" aria-label={t("tv.exit")} onClick={onExit} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-lg">
           ✕
         </button>
       </header>
@@ -149,31 +152,37 @@ function TvBoard({
             {formatClock(v.remainingMs)}
           </div>
           <div className="font-display mt-2 font-bold tabular" style={{ fontSize: "min(8vw, 11vh)" }}>
-            {v.level.isBreak ? "☕ Перерва" : `${fmtChips(v.level.sb)} / ${fmtChips(v.level.bb)}`}
+            {v.level.isBreak ? t("tv.breakBig") : `${fmtChips(v.level.sb)} / ${fmtChips(v.level.bb)}`}
           </div>
           {!v.level.isBreak && v.level.ante > 0 && (
             <div className="font-semibold text-white/70" style={{ fontSize: "min(3.5vw, 5vh)" }}>
-              анте {fmtChips(v.level.ante)}
+              {t("blinds.ante", { n: fmtChips(v.level.ante) })}
             </div>
           )}
           <div className="mt-3 text-[clamp(.9rem,2vw,1.4rem)] font-semibold text-white/65">
-            {v.status === "paused" ? "⏸ Пауза" : v.status === "idle" ? "Таймер не запущено" : v.nextLevel ? `Далі: ${formatBlinds(v.nextLevel)}` : "Останній рівень"}
+            {v.status === "paused"
+              ? t("tv.paused")
+              : v.status === "idle"
+                ? t("tv.idle")
+                : v.nextLevel
+                  ? t("tv.next", { blinds: formatBlinds(v.nextLevel) })
+                  : t("timer.last")}
           </div>
           {host && (
             <div className="mt-4 flex items-center gap-4">
-              <TvBtn label="Попередній рівень" onClick={() => timer("prev")} disabled={v.levelIndex === 0}>
+              <TvBtn label={t("timer.prev")} onClick={() => timer("prev")} disabled={v.levelIndex === 0}>
                 <IconPrev width={22} height={22} />
               </TvBtn>
               {v.status === "running" ? (
-                <TvBtn label="Пауза" big onClick={() => timer("pause")}>
+                <TvBtn label={t("timer.pause")} big onClick={() => timer("pause")}>
                   <IconPause width={28} height={28} />
                 </TvBtn>
               ) : (
-                <TvBtn label="Старт" big onClick={() => timer(v.status === "paused" ? "resume" : "start")}>
+                <TvBtn label={t("timer.start")} big onClick={() => timer(v.status === "paused" ? "resume" : "start")}>
                   <IconPlay width={28} height={28} />
                 </TvBtn>
               )}
-              <TvBtn label="Наступний рівень" onClick={() => timer("next")} disabled={!v.nextLevel}>
+              <TvBtn label={t("timer.nextLevel")} onClick={() => timer("next")} disabled={!v.nextLevel}>
                 <IconNext width={22} height={22} />
               </TvBtn>
             </div>
@@ -182,20 +191,20 @@ function TvBoard({
 
         <aside className="flex min-h-0 flex-col gap-3 overflow-hidden portrait:flex-col-reverse portrait:justify-end">
           <div className="shrink-0 rounded-3xl bg-black/25 p-4">
-            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-white/50">Наступні рівні</div>
+            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-white/50">{t("tv.upcoming")}</div>
             {upcoming.length ? (
               upcoming.map((l, i) => (
                 <div key={i} className="flex justify-between py-1 text-[clamp(.9rem,1.8vw,1.25rem)] font-semibold tabular">
-                  <span>{l.isBreak ? "☕ Перерва" : formatBlinds(l)}</span>
-                  <span className="text-white/55">{l.minutes ? `${l.minutes} хв` : "∞"}</span>
+                  <span>{l.isBreak ? t("tv.breakBig") : formatBlinds(l)}</span>
+                  <span className="text-white/55">{l.minutes ? t("common.minutes", { n: l.minutes }) : "∞"}</span>
                 </div>
               ))
             ) : (
-              <div className="text-white/60">Це останній рівень</div>
+              <div className="text-white/60">{t("tv.lastLevel")}</div>
             )}
           </div>
           <div className="min-h-0 shrink-0 rounded-3xl bg-black/25 p-4">
-            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-white/50">Лідери за фішками</div>
+            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-white/50">{t("tv.leaders")}</div>
             {top.map((p, i) => (
               <div key={p.id} className="flex items-center justify-between gap-3 py-1 text-[clamp(.9rem,1.8vw,1.25rem)] font-semibold">
                 <span className="min-w-0 truncate">

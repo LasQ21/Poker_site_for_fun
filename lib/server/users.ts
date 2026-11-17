@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { chatMembers, chats, users, type User } from "@/lib/db/schema";
 import type { TelegramUser } from "@/lib/auth/telegram";
 import { nanoid } from "nanoid";
+import { pickLang, type Lang } from "@/lib/i18n";
 
 export async function upsertUser(u: TelegramUser): Promise<User> {
   const [row] = await db
@@ -13,6 +14,7 @@ export async function upsertUser(u: TelegramUser): Promise<User> {
       lastName: u.last_name ?? null,
       username: u.username ?? null,
       photoUrl: u.photo_url ?? null,
+      languageCode: u.language_code ?? null,
     })
     .onConflictDoUpdate({
       target: users.id,
@@ -21,6 +23,7 @@ export async function upsertUser(u: TelegramUser): Promise<User> {
         lastName: u.last_name ?? null,
         username: u.username ?? null,
         photoUrl: sql`coalesce(${u.photo_url ?? null}, ${users.photoUrl})`,
+        languageCode: sql`coalesce(${u.language_code ?? null}, ${users.languageCode})`,
         updatedAt: new Date(),
       },
     })
@@ -52,6 +55,16 @@ export async function removeMember(chatId: number, userId: number) {
 /** The bot was removed from a group: nobody can be verified as a member any more. */
 export async function forgetChatMembers(chatId: number) {
   await db.delete(chatMembers).where(eq(chatMembers.chatId, chatId));
+}
+
+/** Language for messages addressed to this user (explicit choice, then Telegram's language). */
+export function userLang(u: Pick<User, "lang" | "languageCode"> | null | undefined): Lang {
+  return u?.lang === "uk" || u?.lang === "en" ? u.lang : pickLang(u?.languageCode);
+}
+
+export async function langOfUser(userId: number): Promise<Lang> {
+  const [u] = await db.select({ lang: users.lang, languageCode: users.languageCode }).from(users).where(eq(users.id, userId));
+  return userLang(u);
 }
 
 export function displayNameOf(u: { firstName: string; lastName?: string | null } | TelegramUser): string {

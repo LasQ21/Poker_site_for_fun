@@ -1,3 +1,6 @@
+import { fmtChips, getFormatLang } from "@/lib/format";
+import { translate, type Lang } from "@/lib/i18n";
+
 /** One level of a blind structure. `minutes` is the level duration. */
 export interface BlindLevel {
   sb: number;
@@ -32,11 +35,12 @@ export interface TimerView {
 
 export type BlindTemplateId = "turbo" | "regular" | "deep" | "cash";
 
-export const BLIND_TEMPLATES: Record<BlindTemplateId, { label: string; minutes: number }> = {
-  turbo: { label: "Швидка (10 хв)", minutes: 10 },
-  regular: { label: "Звичайна (20 хв)", minutes: 20 },
-  deep: { label: "Повільна (30 хв)", minutes: 30 },
-  cash: { label: "Кеш (фіксовані)", minutes: 0 },
+/** Level length per template; labels are i18n keys `blinds.tpl.<id>` / `blinds.tplShort.<id>`. */
+export const BLIND_TEMPLATES: Record<BlindTemplateId, { minutes: number }> = {
+  turbo: { minutes: 10 },
+  regular: { minutes: 20 },
+  deep: { minutes: 30 },
+  cash: { minutes: 0 },
 };
 
 /** Small-blind ladder in "units" (unit = starting stack / 400, rounded to a nice number); BB = 2 × SB. */
@@ -156,10 +160,10 @@ export function applyTimerAction(
   }
 }
 
-export function formatBlinds(level: BlindLevel): string {
-  if (level.isBreak) return "Перерва";
+export function formatBlinds(level: BlindLevel, lang: Lang = getFormatLang()): string {
+  if (level.isBreak) return translate(lang, "blinds.break");
   const base = `${fmt(level.sb)}/${fmt(level.bb)}`;
-  return level.ante ? `${base} (анте ${fmt(level.ante)})` : base;
+  return level.ante ? translate(lang, "blinds.withAnte", { blinds: base, ante: fmt(level.ante) }) : base;
 }
 
 export function formatClock(ms: number): string {
@@ -173,5 +177,5 @@ export function formatClock(ms: number): string {
 }
 
 function fmt(n: number) {
-  return n.toLocaleString("uk-UA").replace(/ /g, " ");
+  return fmtChips(n);
 }

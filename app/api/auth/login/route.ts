@@ -10,7 +10,7 @@ import { SESSION_COOKIE, sessionCookieOptions } from "@/lib/server/viewer";
 export const POST = route(async (req: Request) => {
   const data = await req.json();
   const tgUser = validateLoginWidget(data, config.botToken);
-  if (!tgUser) throw new AppError(401, "Не вдалося перевірити вхід через Telegram");
+  if (!tgUser) throw new AppError(401, "errors.loginFailed");
   const user = await upsertUser(tgUser);
   (await cookies()).set(SESSION_COOKIE, signSession(user.id, config.sessionSecret), sessionCookieOptions());
   return json({ user });

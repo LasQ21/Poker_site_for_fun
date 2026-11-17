@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
 import { useMe } from "./AppShell";
@@ -14,6 +15,7 @@ declare global {
 /** Telegram Login Widget for the website (inside the Mini App the user is already known). */
 export function LoginPanel({ compact }: { compact?: boolean }) {
   const { data, mutate } = useMe();
+  const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,11 +52,11 @@ export function LoginPanel({ compact }: { compact?: boolean }) {
       <div className={`flex flex-col items-center gap-3 px-5 text-center ${compact ? "py-5" : "py-8"}`}>
         
         <div>
-          <div className="font-display text-lg font-bold">Увійдіть через Telegram</div>
-          <div className="mt-1 text-sm text-hint">Щоб створювати ігри та оновлювати свій стек. Переглядати гру за посиланням можна й без входу.</div>
+          <div className="font-display text-lg font-bold">{t("login.title")}</div>
+          <div className="mt-1 text-sm text-hint">{t("login.text")}</div>
         </div>
         <div ref={box} className="min-h-10" />
-        {!data?.botUsername && !data?.devLogin && <div className="text-xs text-hint">Бот ще не налаштований (BOT_USERNAME).</div>}
+        {!data?.botUsername && !data?.devLogin && <div className="text-xs text-hint">{t("login.notConfigured")}</div>}
         {data?.devLogin && (
           <div className="flex flex-wrap justify-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => devLogin(101, "Олег")}>Dev: Олег</Button>

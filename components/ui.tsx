@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { tr } from "@/lib/i18n/client";
 import { useEffect, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
@@ -111,7 +112,7 @@ export function Row({
 export function Spinner({ small }: { small?: boolean }) {
   return (
     <span
-      aria-label="Завантаження"
+      aria-label={tr("common.loading")}
       className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent ${small ? "h-4 w-4" : "h-7 w-7 text-hint"}`}
     />
   );
@@ -210,7 +211,7 @@ export function Sheet({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Закрити"
+              aria-label={tr("common.close")}
               className="glass grid h-9 w-9 shrink-0 place-items-center rounded-full text-hint"
             >
               ✕
@@ -319,5 +320,75 @@ export function Toggle({
         <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-[left] ${checked ? "left-[22px]" : "left-0.5"}`} />
       </span>
     </label>
+  );
+}
+
+// ---------------------------------------------------------------- skeletons (instead of a spinner)
+
+export function Skeleton({ className = "", style }: { className?: string; style?: CSSProperties }) {
+  return <div aria-hidden="true" className={`animate-pulse rounded-2xl bg-fg/8 ${className}`} style={style} />;
+}
+
+function SkeletonRows({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="glass mb-5 overflow-hidden rounded-[30px]">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 border-b hairline px-3.5 py-3 last:border-b-0">
+          <Skeleton className="h-[42px] w-[42px] !rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-2/5" />
+            <Skeleton className="h-3 w-3/5" />
+          </div>
+          <Skeleton className="h-5 w-16" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Loading placeholder that mirrors the page layout, announced to screen readers once. */
+export function PageSkeleton({ variant }: { variant: "home" | "game" | "list" }) {
+  return (
+    <div role="status" aria-busy="true">
+      <span className="sr-only">{tr("common.loading")}</span>
+      {variant === "home" && (
+        <>
+          <div className="glass mb-5 rounded-[34px] px-5 pb-5 pt-6">
+            <Skeleton className="h-8 w-3/5" />
+            <Skeleton className="mt-3 h-4 w-4/5" />
+            <Skeleton className="mt-5 h-12 w-full !rounded-full" />
+          </div>
+          <div className="glass mb-5 rounded-[28px] p-4">
+            <Skeleton className="mb-3 h-4 w-1/3" />
+            <div className="grid grid-cols-4 gap-2.5">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-16 !rounded-[20px]" />
+              ))}
+            </div>
+          </div>
+          <SkeletonRows rows={3} />
+        </>
+      )}
+      {variant === "game" && (
+        <>
+          <div className="mb-3 px-1">
+            <Skeleton className="h-8 w-2/3" />
+            <Skeleton className="mt-2 h-4 w-1/2" />
+          </div>
+          <Skeleton className="mb-5 h-[72px] w-full !rounded-[28px]" />
+          <div className="glass mb-5 grid place-items-center rounded-[34px] py-6">
+            <Skeleton className="aspect-square w-[min(62vw,232px)] !rounded-full" />
+          </div>
+          <SkeletonRows rows={4} />
+        </>
+      )}
+      {variant === "list" && (
+        <>
+          <Skeleton className="mb-2 ml-1 h-8 w-1/2" />
+          <Skeleton className="mb-4 ml-1 h-4 w-2/3" />
+          <SkeletonRows rows={6} />
+        </>
+      )}
+    </div>
   );
 }

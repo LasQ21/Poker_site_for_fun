@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { api } from "@/lib/client/api";
@@ -17,6 +18,7 @@ const REMINDERS = [0, 15, 30, 45, 60];
 export default function NewGamePage() {
   const router = useRouter();
   const toast = useToast();
+  const t = useT();
   const { data: me, isLoading } = useMe();
   const back = useAppBack("/");
   useBackButton(back);
@@ -36,7 +38,7 @@ export default function NewGamePage() {
   const preview = useMemo(() => buildStructure(effectiveTemplate, stack).filter((l) => !l.isBreak).slice(0, 4), [effectiveTemplate, stack]);
 
   const nativeCreate = useMainButton(
-    me?.user ? { text: type === "cash" ? "Створити кеш-гру" : "Створити турнір", loading: busy, disabled: stack < 1, onClick: () => void submit() } : null,
+    me?.user ? { text: t(type === "cash" ? "new.createCash" : "new.createTournament"), loading: busy, disabled: stack < 1, onClick: () => void submit() } : null,
   );
 
   if (isLoading) return <PageLoader />;
@@ -75,7 +77,7 @@ export default function NewGamePage() {
 
   return (
     <div>
-      <h1 className="font-display mb-4 px-1 text-2xl font-bold">Нова гра</h1>
+      <h1 className="font-display mb-4 px-1 text-2xl font-bold">{t("new.title")}</h1>
 
       <Section>
         <div className="p-3">
@@ -86,20 +88,18 @@ export default function NewGamePage() {
               haptic("select");
             }}
             options={[
-              { value: "tournament", label: "Турнір" },
-              { value: "cash", label: "Кеш" },
+              { value: "tournament", label: t("common.tournament") },
+              { value: "cash", label: t("common.cash") },
             ]}
           />
           <p className="mt-2 px-1 text-[13px] text-hint">
-            {type === "cash"
-              ? "Гравці докуповують фішки; результат — фінальний стек мінус бай-іни (у фішках і бай-інах)."
-              : "Гравці вибувають, місця дають очки сезону: N − місце + 1, переможцю +2."}
+            {t(type === "cash" ? "new.cashHint" : "new.tournamentHint")}
           </p>
         </div>
-        <Field label="Назва (необов'язково)">
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "cash" ? "Кеш у Сашка" : "Турнір п'ятниці"} maxLength={80} />
+        <Field label={t("new.nameLabel")}>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder={t(type === "cash" ? "new.namePhCash" : "new.namePhTournament")} maxLength={80} />
         </Field>
-        <Field label="Стартовий стек (фішки)">
+        <Field label={t("new.stackLabel")}>
           <div className="mb-2 flex gap-2">
             {STACKS.map((s) => (
               <Choice key={s} active={stack === s} onClick={() => setStack(s)}>
@@ -117,36 +117,36 @@ export default function NewGamePage() {
       </Section>
 
       {type === "tournament" && (
-        <Section title="Блайнди">
+        <Section title={t("new.blinds")}>
           <div className="p-3">
             <Segmented
               value={effectiveTemplate as "turbo" | "regular" | "deep"}
               onChange={setTemplate}
-              options={(["turbo", "regular", "deep"] as const).map((t) => ({ value: t, label: BLIND_TEMPLATES[t].label.split(" ")[0] }))}
+              options={(["turbo", "regular", "deep"] as const).map((tpl) => ({ value: tpl, label: t(`blinds.tplShort.${tpl}`) }))}
             />
             <div className="mt-2 px-1 text-[13px] text-hint">
-              {BLIND_TEMPLATES[effectiveTemplate].minutes} хв на рівень: {preview.map(formatBlinds).join(" → ")} → …
+              {t("new.blindsPreview", { min: BLIND_TEMPLATES[effectiveTemplate].minutes, levels: preview.map((l) => formatBlinds(l)).join(" → ") })}
               <br />
-              Структуру можна змінити після створення.
+              {t("new.blindsEditLater")}
             </div>
           </div>
         </Section>
       )}
       {type === "cash" && (
-        <Section title="Блайнди">
+        <Section title={t("new.blinds")}>
           <div className="px-4 py-3 text-sm">
-            Фіксовані: <b>{formatBlinds(preview[0])}</b>
-            <span className="text-hint"> (змінюються в налаштуваннях гри)</span>
+            {t("new.fixed")} <b>{formatBlinds(preview[0])}</b>
+            <span className="text-hint">{t("new.fixedHint")}</span>
           </div>
         </Section>
       )}
 
-      <Section title="Група Telegram">
+      <Section title={t("new.group")}>
         {me.chats.length ? (
           <>
-            <Field label="Прив'язати до групи" hint="Ігри групи потрапляють у її лідерборд; бот пише туди нагадування і зміни блайндів.">
+            <Field label={t("new.linkGroup")} hint={t("new.linkGroupHint")}>
               <select className={inputCls} value={chatId ?? ""} onChange={(e) => setChatId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Без групи</option>
+                <option value="">{t("new.noGroup")}</option>
                 {me.chats.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.title}
@@ -155,11 +155,11 @@ export default function NewGamePage() {
               </select>
             </Field>
             {chatId && (
-              <Field label="Нагадування оновити стеки">
+              <Field label={t("new.reminder")}>
                 <div className="flex gap-2">
                   {REMINDERS.map((m) => (
                     <Choice key={m} active={reminder === m} onClick={() => setReminder(m)}>
-                      {m ? `${m} хв` : "Вимк."}
+                      {m ? t("common.minutes", { n: m }) : t("common.off")}
                     </Choice>
                   ))}
                 </div>
@@ -168,43 +168,43 @@ export default function NewGamePage() {
           </>
         ) : (
           <div className="px-4 py-3 text-[13px] text-hint">
-            Додайте бота в груповий чат і напишіть там будь-яку команду (напр. /help) — група з&apos;явиться тут.
+            {t("new.noGroupsHint")}
           </div>
         )}
       </Section>
 
-      <Section title="Гравці">
+      <Section title={t("new.players")}>
         <label className="flex items-center justify-between border-b border-sep px-4 py-3">
-          <span>Я теж граю</span>
+          <span>{t("new.iPlay")}</span>
           <input type="checkbox" className="h-5 w-5 accent-[var(--app-button)]" checked={hostPlays} onChange={(e) => setHostPlays(e.target.checked)} />
         </label>
         {names.map((n, i) => (
           <div key={i} className="flex items-center justify-between border-b border-sep px-4 py-2.5">
             <span>{n}</span>
             <button type="button" className="text-sm text-danger" onClick={() => setNames((xs) => xs.filter((_, j) => j !== i))}>
-              Прибрати
+              {t("new.remove")}
             </button>
           </div>
         ))}
         <div className="flex gap-2 p-3">
           <input
             className={inputCls}
-            placeholder="Ім'я гравця"
+            placeholder={t("new.playerName")}
             value={draft}
             maxLength={40}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addName())}
           />
           <Button variant="secondary" onClick={addName} disabled={!draft.trim()}>
-            Додати
+            {t("common.add")}
           </Button>
         </div>
-        <div className="px-4 pb-3 text-[13px] text-hint">Друзі з Telegram зможуть самі «сісти» на своє місце за посиланням або командою /join.</div>
+        <div className="px-4 pb-3 text-[13px] text-hint">{t("new.friendsHint")}</div>
       </Section>
 
       {!nativeCreate && (
         <Button size="lg" className="w-full" onClick={submit} loading={busy} disabled={stack < 1}>
-          Створити гру
+          {t("new.create")}
         </Button>
       )}
     </div>

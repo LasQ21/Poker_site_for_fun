@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useEffect, useState } from "react";
 import { fmtChips, fmtDateTime, fmtSigned } from "@/lib/format";
 import { confirmDialog, haptic, useClosingConfirmation, useMainButton } from "@/lib/client/telegram";
@@ -32,6 +33,7 @@ export function StackEditor({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [customBuyin, setCustomBuyin] = useState<string | null>(null);
+  const t = useT();
 
   // Reset only when another player is opened: live updates of the same player must not wipe input.
   const playerId = player?.id;
@@ -56,10 +58,10 @@ export function StackEditor({
   const nativeSave = useMainButton(
     player && editable
       ? {
-          text: `Зберегти стек · ${fmtChips(value)}`,
+          text: t("editor.saveNative", { n: fmtChips(value) }),
           disabled: unchanged,
           loading: busy,
-          onClick: () => void run({ action: "setStack", playerId: player.id, chips: value }, "Стек оновлено"),
+          onClick: () => void run({ action: "setStack", playerId: player.id, chips: value }, t("editor.saved")),
         }
       : null,
   );
@@ -101,10 +103,10 @@ export function StackEditor({
     <Sheet open onClose={onClose} title={player.displayName}>
       <div className="mb-3 flex items-center justify-between text-sm text-hint">
         <span>
-          Бай-іни: {player.buyinCount} · {fmtChips(player.buyinChips)}
+          {t("editor.buyins", { n: player.buyinCount, chips: fmtChips(player.buyinChips) })}
         </span>
         {r && game.type === "cash" && <Signed value={r.netChips} className="font-semibold">{fmtSigned(r.netChips)}</Signed>}
-        {game.type === "tournament" && player.status === "busted" && <span>вибув · {player.finishPlace}-е</span>}
+        {game.type === "tournament" && player.status === "busted" && <span>{t("editor.outPlace", { n: player.finishPlace })}</span>}
       </div>
 
       {editable ? (
@@ -112,7 +114,7 @@ export function StackEditor({
           <div className="mb-3 rounded-[26px] bg-fg/5 px-4 py-3.5 text-center ring-1 ring-inset ring-fg/5">
             <div className={`font-display text-[2.6rem] font-bold leading-tight tabular ${fresh ? "text-fg" : "text-link"}`}>{fmtChips(value)}</div>
             <div className="h-5 text-sm">
-              {delta !== 0 && <Signed value={delta}>{fmtSigned(delta)} від поточного</Signed>}
+              {delta !== 0 && <Signed value={delta}>{t("editor.fromCurrent", { d: fmtSigned(delta) })}</Signed>}
             </div>
           </div>
 
@@ -149,9 +151,9 @@ export function StackEditor({
               className="mb-3 w-full"
               loading={busy}
               disabled={unchanged}
-              onClick={() => run({ action: "setStack", playerId: player.id, chips: value }, "Стек оновлено")}
+              onClick={() => run({ action: "setStack", playerId: player.id, chips: value }, t("editor.saved"))}
             >
-              Зберегти стек
+              {t("editor.save")}
             </Button>
           )}
 
@@ -159,12 +161,12 @@ export function StackEditor({
             <Button
               variant="secondary"
               disabled={busy}
-              onClick={() => run({ action: "buyin", playerId: player.id, kind: "rebuy" }, `Ребай +${fmtChips(game.startingStack)}`)}
+              onClick={() => run({ action: "buyin", playerId: player.id, kind: "rebuy" }, t("editor.rebuyDone", { n: fmtChips(game.startingStack) }))}
             >
-              🔁 Ребай +{fmtChips(game.startingStack)}
+              {t("editor.rebuy", { n: fmtChips(game.startingStack) })}
             </Button>
             <Button variant="secondary" disabled={busy} onClick={() => setCustomBuyin(customBuyin == null ? "" : null)}>
-              ＋ Інша сума
+              {t("editor.otherAmount")}
             </Button>
           </div>
           {customBuyin != null && (
@@ -172,7 +174,7 @@ export function StackEditor({
               <input
                 className={inputCls}
                 inputMode="numeric"
-                placeholder="Фішки"
+                placeholder={t("editor.chips")}
                 autoFocus
                 value={customBuyin}
                 onChange={(e) => setCustomBuyin(e.target.value.replace(/\D/g, ""))}
@@ -180,16 +182,16 @@ export function StackEditor({
               <Button
                 variant="secondary"
                 disabled={!Number(customBuyin)}
-                onClick={() => run({ action: "buyin", playerId: player.id, kind: "rebuy", chips: Number(customBuyin) }, "Ребай додано")}
+                onClick={() => run({ action: "buyin", playerId: player.id, kind: "rebuy", chips: Number(customBuyin) }, t("editor.rebuyAdded"))}
               >
-                Ребай
+                {t("kind.rebuy")}
               </Button>
               <Button
                 variant="secondary"
                 disabled={!Number(customBuyin)}
-                onClick={() => run({ action: "buyin", playerId: player.id, kind: "addon", chips: Number(customBuyin) }, "Аддон додано")}
+                onClick={() => run({ action: "buyin", playerId: player.id, kind: "addon", chips: Number(customBuyin) }, t("editor.addonAdded"))}
               >
-                Аддон
+                {t("kind.addon")}
               </Button>
             </div>
           )}
@@ -200,17 +202,17 @@ export function StackEditor({
               className="mb-3 w-full"
               disabled={busy}
               onClick={async () => {
-                if (await confirmDialog(`${player.displayName} вибуває?`)) {
+                if (await confirmDialog(t("editor.bustConfirm", { name: player.displayName }))) {
                   haptic("heavy");
-                  await run({ action: "bust", playerId: player.id }, game.type === "tournament" ? "Гравець вибув" : "Стек обнулено");
+                  await run({ action: "bust", playerId: player.id }, t(game.type === "tournament" ? "editor.busted" : "editor.zeroed"));
                 }
               }}
             >
-              💥 {game.type === "tournament" ? "Вибув" : "Без фішок"}
+              {t(game.type === "tournament" ? "editor.bust" : "editor.noChips")}
             </Button>
           ) : host ? (
-            <Button variant="secondary" className="mb-3 w-full" onClick={() => run({ action: "unbust", playerId: player.id }, "Гравця повернуто")}>
-              ↩︎ Повернути в гру (без ребаю)
+            <Button variant="secondary" className="mb-3 w-full" onClick={() => run({ action: "unbust", playerId: player.id }, t("editor.unbusted"))}>
+              {t("editor.unbust")}
             </Button>
           ) : null}
         </>
@@ -218,30 +220,30 @@ export function StackEditor({
         <div className="mb-4 rounded-[26px] bg-fg/5 px-4 py-4 text-center">
           <div className="font-display text-4xl font-bold tabular">{fmtChips(player.currentChips)}</div>
           <div className="mt-1 text-sm text-hint">
-            {state.viewer ? "Змінювати цей стек може лише сам гравець або хост." : "Увійдіть, щоб оновлювати свій стек."}
+            {t(state.viewer ? "editor.readonly" : "editor.signIn")}
           </div>
         </div>
       )}
 
       {playerBuyins.length > 0 && (
         <div className="mb-3">
-          <div className="mb-1.5 px-1 text-[13px] font-bold text-hint">Бай-іни</div>
+          <div className="mb-1.5 px-1 text-[13px] font-bold text-hint">{t("editor.buyinsTitle")}</div>
           <div className="rounded-[22px] bg-fg/5">
             {playerBuyins.map((b) => (
               <div key={b.id} className="flex items-center justify-between border-b hairline px-3.5 py-2.5 text-sm last:border-b-0">
                 <span>
-                  {b.kind === "buyin" ? "Бай-ін" : b.kind === "rebuy" ? "Ребай" : "Аддон"} · <b className="tabular">{fmtChips(b.chips)}</b>
+                  {t(`kind.${b.kind}`)} · <b className="tabular">{fmtChips(b.chips)}</b>
                 </span>
                 <span className="flex items-center gap-3 text-hint">
                   {fmtDateTime(b.createdAt)}
                   {host && playerBuyins.length > 1 && (
                     <button
                       type="button"
-                      aria-label="Скасувати бай-ін"
+                      aria-label={t("editor.cancelBuyin")}
                       className="text-danger"
                       onClick={async () => {
-                        if (await confirmDialog("Скасувати цей бай-ін? Стек зменшиться на цю суму.")) {
-                          await run({ action: "deleteBuyin", buyinId: b.id }, "Бай-ін скасовано", false);
+                        if (await confirmDialog(t("editor.cancelBuyinConfirm"))) {
+                          await run({ action: "deleteBuyin", buyinId: b.id }, t("editor.buyinCancelled"), false);
                         }
                       }}
                     >
@@ -260,18 +262,18 @@ export function StackEditor({
           {renaming ? (
             <div className="flex gap-2">
               <input className={inputCls} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
-              <Button variant="secondary" disabled={!name.trim()} onClick={() => run({ action: "updatePlayer", playerId: player.id, displayName: name }, "Збережено")}>
-                OK
+              <Button variant="secondary" disabled={!name.trim()} onClick={() => run({ action: "updatePlayer", playerId: player.id, displayName: name }, t("editor.renamed"))}>
+                {t("common.ok")}
               </Button>
             </div>
           ) : (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               <button type="button" className="text-link" onClick={() => setRenaming(true)}>
-                Перейменувати
+                {t("editor.rename")}
               </button>
               {host && player.userId != null && player.userId !== game.hostUserId && (
-                <button type="button" className="text-link" onClick={() => run({ action: "updatePlayer", playerId: player.id, unlink: true }, "Відв'язано")}>
-                  Відв&apos;язати Telegram
+                <button type="button" className="text-link" onClick={() => run({ action: "updatePlayer", playerId: player.id, unlink: true }, t("editor.unlinked"))}>
+                  {t("editor.unlink")}
                 </button>
               )}
               {host && (
@@ -279,12 +281,12 @@ export function StackEditor({
                   type="button"
                   className="text-danger"
                   onClick={async () => {
-                    if (await confirmDialog(`Видалити ${player.displayName} з гри разом з усіма бай-інами?`)) {
-                      await run({ action: "removePlayer", playerId: player.id }, "Гравця видалено");
+                    if (await confirmDialog(t("editor.removeConfirm", { name: player.displayName }))) {
+                      await run({ action: "removePlayer", playerId: player.id }, t("editor.removed"));
                     }
                   }}
                 >
-                  Видалити з гри
+                  {t("editor.remove")}
                 </button>
               )}
             </div>

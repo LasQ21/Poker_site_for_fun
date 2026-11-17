@@ -30,6 +30,10 @@ export const users = pgTable("users", {
   lastName: text("last_name"),
   username: text("username"),
   photoUrl: text("photo_url"),
+  /** Telegram client language (IETF tag), refreshed on every sign-in. */
+  languageCode: text("language_code"),
+  /** Language chosen in the app's settings; wins over languageCode. */
+  lang: text("lang"),
   createdAt: ts("created_at").notNull().defaultNow(),
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });

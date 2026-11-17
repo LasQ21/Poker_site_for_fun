@@ -17,6 +17,7 @@ d("bot (integration)", () => {
   const ANNA = { id: 9002, is_bot: false, first_name: "Анна" };
   const IVAN = { id: 9003, is_bot: false, first_name: "Іван" };
   const OLHA = { id: 9004, is_bot: false, first_name: "Ольга" };
+  const ALL_IDS = [9001, 9002, 9003, 9004, 9005];
   let updateId = 1;
   let messageId = 1;
 
@@ -41,8 +42,10 @@ d("bot (integration)", () => {
     const { eq, inArray } = await import("drizzle-orm");
     await db.delete(chats).where(eq(chats.id, CHAT.id));
     const { games } = await import("@/lib/db/schema");
-    await db.delete(games).where(inArray(games.hostUserId, [HOST.id, ANNA.id, IVAN.id, OLHA.id]));
-    await db.delete(users).where(inArray(users.id, [HOST.id, ANNA.id, IVAN.id, OLHA.id]));
+    await db.delete(games).where(inArray(games.hostUserId, ALL_IDS));
+    await db.delete(users).where(inArray(users.id, ALL_IDS));
+    const { joinAttempts } = await import("@/lib/db/schema");
+    await db.delete(joinAttempts).where(inArray(joinAttempts.userId, ALL_IDS));
     const { createBot } = await import("./index");
     bot = createBot("123:test", {
       id: 1,
@@ -143,5 +146,13 @@ d("bot (integration)", () => {
 
     await bot.handleUpdate(msg(HOST, "/history"));
     expect(lastText()).toContain("Останні ігри");
+  });
+
+  it("answers in the sender's language in private chats", async () => {
+    const EN = { id: 9005, is_bot: false, first_name: "Sam", language_code: "en" };
+    await bot.handleUpdate(msg(EN as typeof HOST, "/join 12", { id: EN.id, type: "private" }));
+    expect(lastText()).toContain("A game code is 4 digits");
+    await bot.handleUpdate(msg(EN as typeof HOST, "/start", { id: EN.id, type: "private" }));
+    expect(lastText()).toContain("Hi, Sam!");
   });
 });

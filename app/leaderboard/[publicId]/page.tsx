@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -7,14 +8,15 @@ import useSWR from "swr";
 import { api, fetcher } from "@/lib/client/api";
 import { useBackButton } from "@/lib/client/telegram";
 import { useAppBack } from "@/lib/client/nav";
-import { fmtBuyins, fmtDate, fmtSigned } from "@/lib/format";
+import { fmtBuyins, fmtDate, fmtDecimal, fmtSigned } from "@/lib/format";
 import type { LeaderboardDTO } from "@/lib/types";
 import { useToast } from "@/components/AppShell";
-import { Button, Empty, inputCls, PageLoader, Section, Segmented, Sheet, Signed } from "@/components/ui";
+import { Button, Empty, inputCls, PageSkeleton, Section, Segmented, Sheet, Signed } from "@/components/ui";
 
 export default function LeaderboardPage() {
   const { publicId } = useParams<{ publicId: string }>();
   const toast = useToast();
+  const t = useT();
   const [season, setSeason] = useState<string>("current");
   const { data, error, isLoading, mutate } = useSWR<LeaderboardDTO>(`/api/leaderboard/${publicId}?season=${season}`, fetcher);
   const [tab, setTab] = useState<"tournament" | "cash" | null>(null);
@@ -23,8 +25,8 @@ export default function LeaderboardPage() {
   const back = useAppBack("/leaderboard");
   useBackButton(back);
 
-  if (isLoading && !data) return <PageLoader />;
-  if (error || !data) return <Empty icon="🤷" title="Лідерборд не знайдено">{error?.message}</Empty>;
+  if (isLoading && !data) return <PageSkeleton variant="list" />;
+  if (error || !data) return <Empty icon="🤷" title={t("lb.notFound")}>{error?.message}</Empty>;
 
   const currentTab = tab ?? (data.gamesCount.tournament >= data.gamesCount.cash ? "tournament" : "cash");
   const rows = currentTab === "tournament" ? data.tournament : data.cash;
@@ -36,7 +38,7 @@ export default function LeaderboardPage() {
       setSeasonSheet(false);
       setSeasonName("");
       setSeason("current");
-      toast("Новий сезон розпочато");
+      toast(t("lb.newSeasonStarted"));
       mutate();
     } catch (e) {
       toast((e as Error).message);
@@ -47,13 +49,14 @@ export default function LeaderboardPage() {
     <div>
       <h1 className="font-display px-1 text-[1.6rem] font-bold leading-tight">{data.chat.title}</h1>
       <div className="mb-4 px-1 text-sm font-medium text-hint">
-        {data.season ? `Сезон «${data.season.name}»` : "За весь час"} · {data.gamesCount.tournament} турнірів, {data.gamesCount.cash} кеш-ігор
+        {data.season ? t("lb.season", { name: data.season.name }) : t("lb.allTime")} · {t("common.tournaments", { n: data.gamesCount.tournament })},{" "}
+        {t("common.cashGames", { n: data.gamesCount.cash })}
       </div>
 
       <div className="mb-3 flex gap-2">
         <select className={`${inputCls} !py-2 text-sm`} value={season} onChange={(e) => setSeason(e.target.value)}>
-          <option value="current">{activeSeason ? `Поточний: ${activeSeason.name}` : "Поточний (весь час)"}</option>
-          <option value="all">Весь час</option>
+          <option value="current">{activeSeason ? t("lb.current", { name: activeSeason.name }) : t("lb.currentAll")}</option>
+          <option value="all">{t("lb.allTimeOption")}</option>
           {data.seasons.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name} ({fmtDate(s.startsAt)}
@@ -63,7 +66,7 @@ export default function LeaderboardPage() {
         </select>
         {data.canManageSeasons && (
           <Button variant="secondary" size="sm" className="!h-auto shrink-0" onClick={() => setSeasonSheet(true)}>
-            Сезон…
+            {t("lb.seasonBtn")}
           </Button>
         )}
       </div>
@@ -73,8 +76,8 @@ export default function LeaderboardPage() {
           value={currentTab}
           onChange={setTab}
           options={[
-            { value: "tournament", label: "Турніри" },
-            { value: "cash", label: "Кеш" },
+            { value: "tournament", label: t("lb.tabTournaments") },
+            { value: "cash", label: t("lb.tabCash") },
           ]}
         />
       </div>
@@ -93,11 +96,11 @@ export default function LeaderboardPage() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-semibold">{r.displayName}</span>
                 <span className="block text-[12px] text-hint">
-                  {r.games} ігор · {r.wins} перемог ·{" "}
-                  {currentTab === "tournament" ? `сер. місце ${r.avgPlace}` : `сер. ${fmtBuyins(r.avgResult)}`}
+                  {t("common.games", { n: r.games })} · {t("common.wins", { n: r.wins })} ·{" "}
+                  {currentTab === "tournament" ? t("lb.avgPlace", { n: fmtDecimal(r.avgPlace) }) : t("lb.avg", { v: fmtBuyins(r.avgResult) })}
                   {r.bestGame && (
                     <>
-                      {" "}· найкраща: <Link className="text-link" href={`/g/${r.bestGame.gameId}/summary`}>{r.bestGame.gameName}</Link>
+                      {" "}· {t("lb.best")} <Link className="text-link" href={`/g/${r.bestGame.gameId}/summary`}>{r.bestGame.gameName}</Link>
                     </>
                   )}
                 </span>
@@ -115,12 +118,12 @@ export default function LeaderboardPage() {
             </div>
           ))
         ) : (
-          <Empty icon="📭" title="Ще немає результатів">Завершені ігри групи з’являться тут.</Empty>
+          <Empty icon="📭" title={t("lb.noResults")}>{t("lb.noResultsText")}</Empty>
         )}
       </Section>
 
       {data.recent.length > 0 && (
-        <Section title="Останні ігри">
+        <Section title={t("lb.recent")}>
           {data.recent.map((g) => (
             <Link key={g.id} href={`/g/${g.id}/summary`} className="flex items-center justify-between border-b border-sep px-4 py-3 last:border-b-0 active:bg-fg/5">
               <span>
@@ -133,11 +136,11 @@ export default function LeaderboardPage() {
         </Section>
       )}
 
-      <Sheet open={seasonSheet} onClose={() => setSeasonSheet(false)} title="Сезони">
-        <p className="mb-3 text-sm text-hint">Новий сезон обнуляє лідерборд: нові ігри групи рахуються в нього. Старі сезони залишаються в історії.</p>
+      <Sheet open={seasonSheet} onClose={() => setSeasonSheet(false)} title={t("lb.seasons")}>
+        <p className="mb-3 text-sm text-hint">{t("lb.seasonsText")}</p>
         <div className="mb-3 flex gap-2">
-          <input className={inputCls} placeholder="Назва, напр. Зима 2026" value={seasonName} maxLength={60} onChange={(e) => setSeasonName(e.target.value)} />
-          <Button onClick={newSeason} disabled={!seasonName.trim()}>Почати</Button>
+          <input className={inputCls} placeholder={t("lb.seasonPlaceholder")} value={seasonName} maxLength={60} onChange={(e) => setSeasonName(e.target.value)} />
+          <Button onClick={newSeason} disabled={!seasonName.trim()}>{t("lb.start")}</Button>
         </div>
         {activeSeason && (
           <Button
@@ -147,14 +150,14 @@ export default function LeaderboardPage() {
               try {
                 await api(`/api/chats/${publicId}/seasons`, "DELETE");
                 setSeasonSheet(false);
-                toast("Сезон завершено");
+                toast(t("lb.seasonEnded"));
                 mutate();
               } catch (e) {
                 toast((e as Error).message);
               }
             }}
           >
-            Завершити «{activeSeason.name}»
+            {t("lb.endSeason", { name: activeSeason.name })}
           </Button>
         )}
       </Sheet>

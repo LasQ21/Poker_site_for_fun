@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { Api } from "grammy";
 import { appUrl, config } from "@/lib/config";
-import { GROUP_COMMANDS, PRIVATE_COMMANDS } from "@/lib/bot";
+import { botCommands } from "@/lib/bot";
+import { translate } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -33,14 +34,18 @@ export async function POST(req: Request) {
     allowed_updates: ["message", "callback_query", "my_chat_member"],
     drop_pending_updates: true,
   });
-  results.privateCommands = await api.setMyCommands(PRIVATE_COMMANDS, { scope: { type: "all_private_chats" } });
-  results.groupCommands = await api.setMyCommands(GROUP_COMMANDS, { scope: { type: "all_group_chats" } });
+  // Ukrainian is the default; Telegram clients in English get English commands and description.
+  for (const lang of ["uk", "en"] as const) {
+    const language_code = lang === "uk" ? undefined : lang;
+    results[`privateCommands_${lang}`] = await api.setMyCommands(botCommands("private", lang), { scope: { type: "all_private_chats" }, language_code });
+    results[`groupCommands_${lang}`] = await api.setMyCommands(botCommands("group", lang), { scope: { type: "all_group_chats" }, language_code });
+    results[`description_${lang}`] = await api
+      .setMyShortDescription(translate(lang, "bot.shortDescription"), { language_code })
+      .catch((e: Error) => e.message);
+  }
   results.menuButton = await api.setChatMenuButton({
-    menu_button: { type: "web_app", text: "Покер", web_app: { url: base } },
+    menu_button: { type: "web_app", text: translate("uk", "bot.menuButton"), web_app: { url: base } },
   });
-  results.description = await api
-    .setMyShortDescription("Облік стеків у домашньому покері: кеш і турніри, таймер блайндів, лідерборд.")
-    .catch((e: Error) => e.message);
   results.webhookInfo = await api.getWebhookInfo();
   return Response.json({ ok: true, appUrl: base, results });
 }

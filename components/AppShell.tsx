@@ -7,7 +7,9 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/client/api";
 import { closeMiniApp, getWebApp } from "@/lib/client/telegram";
 import { recordNavigation } from "@/lib/client/nav";
-import { loadSettings } from "@/lib/client/settings";
+import { loadSettings, useSettings } from "@/lib/client/settings";
+import { pickLang } from "@/lib/i18n";
+import { setClientLang, useT } from "@/lib/i18n/client";
 import type { MeDTO } from "@/lib/types";
 import { IconCards, IconHistory, IconSettings, IconTrophy, IconUser } from "./icons";
 import { Button, Toast } from "./ui";
@@ -20,11 +22,11 @@ export function useMe() {
 }
 
 const TABS = [
-  { href: "/", label: "Ігри", Icon: IconCards, match: (p: string) => p === "/" },
-  { href: "/leaderboard", label: "Рейтинг", Icon: IconTrophy, match: (p: string) => p.startsWith("/leaderboard") },
-  { href: "/history", label: "Історія", Icon: IconHistory, match: (p: string) => p.startsWith("/history") },
-  { href: "/profile", label: "Профіль", Icon: IconUser, match: (p: string) => p.startsWith("/profile") },
-];
+  { href: "/", label: "nav.games", Icon: IconCards, match: (p: string) => p === "/" },
+  { href: "/leaderboard", label: "nav.rating", Icon: IconTrophy, match: (p: string) => p.startsWith("/leaderboard") },
+  { href: "/history", label: "nav.history", Icon: IconHistory, match: (p: string) => p.startsWith("/history") },
+  { href: "/profile", label: "nav.profile", Icon: IconUser, match: (p: string) => p.startsWith("/profile") },
+] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -41,6 +43,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     void loadSettings();
   }, []);
+
+  // Interface language: explicit setting → Telegram client language → browser language.
+  const settings = useSettings();
+  const t = useT();
+  useEffect(() => {
+    const tgCode = getWebApp()?.initDataUnsafe.user?.language_code;
+    setClientLang(settings.lang !== "auto" ? settings.lang : pickLang(tgCode, ...(navigator.languages ?? [navigator.language])));
+  }, [settings.lang]);
 
   useEffect(() => {
     // Real refraction only where backdrop-filter:url() works (Chromium, not iOS WebKit).
@@ -108,7 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   }`}
                 >
                   <Icon width={22} height={22} />
-                  {label}
+                  {t(label)}
                 </Link>
               );
             })}
@@ -121,15 +131,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 function SessionExpired() {
+  const t = useT();
   return (
     <div className="glass mt-10 rounded-[34px] px-6 py-10 text-center">
       <div className="mb-3 text-5xl">⏳</div>
-      <h1 className="font-display text-xl font-bold">Сесія застаріла</h1>
-      <p className="mx-auto mt-2 max-w-xs text-[15px] text-hint">
-        Telegram не підтвердив вхід — так буває, якщо застосунок довго був відкритий. Закрийте його й відкрийте знову з чату з ботом.
-      </p>
+      <h1 className="font-display text-xl font-bold">{t("session.title")}</h1>
+      <p className="mx-auto mt-2 max-w-xs text-[15px] text-hint">{t("session.text")}</p>
       <Button size="lg" className="mt-6 w-full" onClick={closeMiniApp}>
-        Перезапустити
+        {t("session.restart")}
       </Button>
     </div>
   );
@@ -137,6 +146,7 @@ function SessionExpired() {
 
 function SiteHeader() {
   const { data } = useMe();
+  const t = useT();
   return (
     <header className="sticky top-0 z-30 px-3 pt-3">
       <div className="glass mx-auto flex h-14 max-w-xl items-center justify-between rounded-full pl-2 pr-4">
@@ -156,7 +166,7 @@ function SiteHeader() {
               {data.user.firstName}
             </span>
           )}
-          <Link href="/settings" aria-label="Налаштування" className="text-hint">
+          <Link href="/settings" aria-label={t("nav.settings")} className="text-hint">
             <IconSettings width={22} height={22} />
           </Link>
         </span>

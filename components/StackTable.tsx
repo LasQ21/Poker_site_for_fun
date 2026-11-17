@@ -1,6 +1,8 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { fmtBuyins, fmtChips, fmtSigned } from "@/lib/format";
+import type { T } from "@/lib/i18n";
 import type { GameStateDTO, PlayerDTO } from "@/lib/types";
 import { IconChevron } from "./icons";
 import { Badge, ChipAvatar, Signed } from "./ui";
@@ -18,16 +20,17 @@ export function canEdit(state: GameStateDTO, p: PlayerDTO) {
   return state.role === "host" || (state.viewer != null && p.userId === state.viewer.id);
 }
 
-function ago(iso: string | null, now: number) {
+function ago(t: T, iso: string | null, now: number) {
   if (!iso) return "";
   const min = Math.floor((now - new Date(iso).getTime()) / 60_000);
-  if (min < 1) return "щойно";
-  if (min < 60) return `${min} хв тому`;
-  return `${Math.floor(min / 60)} год тому`;
+  if (min < 1) return t("table.justNow");
+  if (min < 60) return t("table.minAgo", { n: min });
+  return t("table.hAgo", { n: Math.floor(min / 60) });
 }
 
 export function StackTable({ state, onSelect, now, bb }: { state: GameStateDTO; onSelect: (p: PlayerDTO) => void; now: number; bb: number }) {
   const { game } = state;
+  const t = useT();
   const resultById = new Map(state.results.map((r) => [r.playerId, r]));
   const leader = Math.max(1, ...state.players.map((p) => p.currentChips));
   const order =
@@ -57,14 +60,14 @@ export function StackTable({ state, onSelect, now, bb }: { state: GameStateDTO; 
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">
                 <span className={`truncate font-bold ${out && game.type === "tournament" ? "line-through" : ""}`}>{p.displayName}</span>
-                {mine && <Badge tone="accent">ви</Badge>}
-                {p.userId == null && <span title="Без Telegram" className="text-[11px] text-hint">○</span>}
-                {p.userId === state.game.hostUserId && <span title="Хост" className="text-[12px]">👑</span>}
+                {mine && <Badge tone="accent">{t("common.you")}</Badge>}
+                {p.userId == null && <span title={t("table.noTelegram")} className="text-[11px] text-hint">○</span>}
+                {p.userId === state.game.hostUserId && <span title={t("table.host")} className="text-[12px]">👑</span>}
               </span>
               <span className="mt-0.5 block text-[12px] font-medium text-hint">
                 {game.type === "tournament" && out
-                  ? `вибув · ${r?.place}-е місце`
-                  : `${game.tables && p.tableNo != null ? `стіл ${p.tableNo}·${p.seatNo} · ` : ""}${p.buyinCount} БІ · ${ago(p.lastUpdateAt, now)}`}
+                  ? t("table.out", { place: t("common.place", { n: r?.place ?? 0 }) })
+                  : `${game.tables && p.tableNo != null ? t("table.seat", { t: p.tableNo, s: p.seatNo }) : ""}${t("common.bi", { n: p.buyinCount })} · ${ago(t, p.lastUpdateAt, now)}`}
               </span>
               {!out && (
                 <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-fg/8">

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { api } from "@/lib/client/api";
+import { tr, useT } from "@/lib/i18n/client";
 import { haptic } from "@/lib/client/telegram";
 import { useToast } from "./AppShell";
 import { Spinner } from "./ui";
@@ -14,13 +15,14 @@ export async function joinWithCode(code: string): Promise<JoinResult> {
 }
 
 export function joinMessage(r: JoinResult) {
-  return r.status === "joined" ? "Ви за столом!" : r.status === "already" ? "Ви вже в цій грі" : "Оберіть своє місце";
+  return tr(r.status === "joined" ? "join.joined" : r.status === "already" ? "join.already" : "join.chooseSeat");
 }
 
 /** Four-digit code entry; submits as soon as the fourth digit is typed. */
 export function JoinByCode() {
   const router = useRouter();
   const toast = useToast();
+  const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,11 +49,11 @@ export function JoinByCode() {
   return (
     <div className="glass mb-5 rounded-[28px] px-4 py-4">
       <div className="mb-3 flex items-baseline justify-between px-1">
-        <span className="font-bold">Є код гри?</span>
-        <span className="text-[13px] font-medium text-hint">його показує хост</span>
+        <span className="font-bold">{t("join.haveCode")}</span>
+        <span className="text-[13px] font-medium text-hint">{t("join.hostShows")}</span>
       </div>
       <label className="relative block cursor-text" onClick={() => input.current?.focus()}>
-        <span className="sr-only">Код гри з 4 цифр</span>
+        <span className="sr-only">{t("join.codeLabel")}</span>
         <input
           ref={input}
           value={code}

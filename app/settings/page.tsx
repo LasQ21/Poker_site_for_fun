@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useAppBack } from "@/lib/client/nav";
-import { updateSettings, useSettings } from "@/lib/client/settings";
+import { api } from "@/lib/client/api";
+import { updateSettings, useSettings, type LangSetting } from "@/lib/client/settings";
+import { useT } from "@/lib/i18n/client";
 import {
   addToHomeScreen,
   canAddToHomeScreen,
@@ -17,10 +19,13 @@ import {
   useIsMiniApp,
 } from "@/lib/client/telegram";
 import { beep, unlockAudio } from "@/lib/client/timer";
-import { Button, Section, Toggle } from "@/components/ui";
+import { useMe } from "@/components/AppShell";
+import { Button, Section, Segmented, Toggle } from "@/components/ui";
 
 export default function SettingsPage() {
   const settings = useSettings();
+  const t = useT();
+  const { data: me } = useMe();
   const miniApp = useIsMiniApp();
   const back = useAppBack("/");
   useBackButton(back);
@@ -44,12 +49,31 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h1 className="font-display mb-4 px-1 text-[1.6rem] font-bold">Налаштування</h1>
+      <h1 className="font-display mb-4 px-1 text-[1.6rem] font-bold">{t("settings.title")}</h1>
 
-      <Section title="Сигнали">
+      <Section title={t("settings.language")}>
+        <div className="p-3">
+          <Segmented<LangSetting>
+            value={settings.lang}
+            onChange={(lang) => {
+              void updateSettings({ lang });
+              // The server uses it for the bot's group messages in games this user hosts.
+              if (me?.user) void api("/api/me", "PATCH", { lang: lang === "auto" ? null : lang }).catch(() => {});
+            }}
+            options={[
+              { value: "auto", label: t("settings.langAuto") },
+              { value: "uk", label: t("lang.uk") },
+              { value: "en", label: t("lang.en") },
+            ]}
+          />
+          <p className="mt-2 px-1 text-[13px] text-hint">{t("settings.langHint")}</p>
+        </div>
+      </Section>
+
+      <Section title={t("settings.signals")}>
         <Toggle
-          label="Звук зміни рівня"
-          hint="Сигнал, коли закінчується рівень блайндів"
+          label={t("settings.sound")}
+          hint={t("settings.soundHint")}
           checked={settings.sound}
           onChange={(v) => {
             void updateSettings({ sound: v });
@@ -60,8 +84,8 @@ export default function SettingsPage() {
           }}
         />
         <Toggle
-          label="Вібрація"
-          hint="Тактильний відгук на дії та зміну рівня"
+          label={t("settings.vibration")}
+          hint={t("settings.vibrationHint")}
           checked={settings.vibration}
           onChange={(v) => {
             void updateSettings({ vibration: v }).then(() => v && haptic("success"));
@@ -73,8 +97,8 @@ export default function SettingsPage() {
         <Section title="Telegram">
           {canFullscreen() && (
             <Toggle
-              label="Повноекранний режим"
-              hint="Без шапки Telegram — зручно для таймера на столі"
+              label={t("settings.fullscreen")}
+              hint={t("settings.fullscreenHint")}
               checked={fullscreen}
               onChange={(v) => (v ? requestFullscreen() : exitFullscreen())}
             />
@@ -82,14 +106,12 @@ export default function SettingsPage() {
           {canAddToHomeScreen() && home !== "unsupported" && (
             <div className="flex items-center gap-3 px-4 py-3.5">
               <span className="min-w-0 flex-1">
-                <span className="block font-semibold">Іконка на головному екрані</span>
-                <span className="mt-0.5 block text-[13px] text-hint">
-                  {home === "added" ? "Уже додано ✓" : "Відкривати трекер одним дотиком"}
-                </span>
+                <span className="block font-semibold">{t("settings.homeScreen")}</span>
+                <span className="mt-0.5 block text-[13px] text-hint">{t(home === "added" ? "settings.homeAdded" : "settings.homeHint")}</span>
               </span>
               {home !== "added" && (
                 <Button size="sm" variant="secondary" onClick={addToHomeScreen}>
-                  Додати
+                  {t("common.add")}
                 </Button>
               )}
             </div>
@@ -98,7 +120,7 @@ export default function SettingsPage() {
       )}
 
       <p className="px-4 text-[13px] text-hint">
-        {miniApp ? "Налаштування зберігаються у вашому Telegram і синхронізуються між пристроями." : "Налаштування зберігаються в цьому браузері."}
+        {t(miniApp ? "settings.storedCloud" : "settings.storedLocal")}
       </p>
     </div>
   );

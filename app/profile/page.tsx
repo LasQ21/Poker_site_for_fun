@@ -1,36 +1,38 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import useSWR from "swr";
 import { fetcher } from "@/lib/client/api";
-import { fmtBuyins, pluralUk } from "@/lib/format";
+import { fmtBuyins, fmtDecimal } from "@/lib/format";
 import type { AchievementId } from "@/lib/game/stats";
 import type { ProfileDTO } from "@/lib/types";
 import { useMe } from "@/components/AppShell";
 import { IconChevron, IconSettings } from "@/components/icons";
 import { LoginPanel } from "@/components/LoginPanel";
-import { Empty, PageLoader, Section, Signed } from "@/components/ui";
+import { Empty, PageSkeleton, Section, Signed } from "@/components/ui";
 
 const FormChart = dynamic(() => import("@/components/FormChart"), { ssr: false, loading: () => <div className="h-[200px]" /> });
 
-const ACHIEVEMENTS: Record<AchievementId, { icon: string; title: string; text: string }> = {
-  first_win: { icon: "🥇", title: "Перша перемога", text: "Виграти гру" },
-  hot_streak: { icon: "🔥", title: "У плюсі", text: "5 ігор поспіль у плюсі або в призах" },
-  regular: { icon: "🪑", title: "Завсідник", text: "Зіграти 10 ігор" },
-  veteran: { icon: "🎖️", title: "Ветеран", text: "Зіграти 50 ігор" },
-  shark: { icon: "🦈", title: "Акула", text: "+5 бай-інів за одну кеш-гру" },
-  comeback: { icon: "🔁", title: "Камбек", text: "Виграти турнір після ребаю" },
-  hat_trick: { icon: "🎩", title: "Хет-трик", text: "3 перемоги в турнірах" },
+const ACHIEVEMENT_ICONS: Record<AchievementId, string> = {
+  first_win: "🥇",
+  hot_streak: "🔥",
+  regular: "🪑",
+  veteran: "🎖️",
+  shark: "🦈",
+  comeback: "🔁",
+  hat_trick: "🎩",
 };
 
 export default function ProfilePage() {
   const { data: me, isLoading: meLoading } = useMe();
+  const t = useT();
   const { data, error, isLoading } = useSWR<ProfileDTO>(me?.user ? "/api/me/stats" : null, fetcher);
 
-  if (meLoading) return <PageLoader />;
+  if (meLoading) return <PageSkeleton variant="list" />;
   if (!me?.user) return <LoginPanel />;
-  if (isLoading || !data) return error ? <Empty icon="🤷" title="Не вдалося завантажити">{error.message}</Empty> : <PageLoader />;
+  if (isLoading || !data) return error ? <Empty icon="🤷" title={t("profile.loadFailed")}>{error.message}</Empty> : <PageSkeleton variant="list" />;
 
   const { user, stats } = data;
   const pct = (x: number | null) => (x == null ? "—" : `${Math.round(x * 100)}%`);
@@ -53,32 +55,32 @@ export default function ProfilePage() {
             </h1>
             {user.username && <div className="text-sm font-semibold text-hint">@{user.username}</div>}
           </div>
-          <Link href="/settings" aria-label="Налаштування" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-full text-hint">
+          <Link href="/settings" aria-label={t("nav.settings")} className="glass grid h-11 w-11 shrink-0 place-items-center rounded-full text-hint">
             <IconSettings width={22} height={22} />
           </Link>
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-          <Tile label={pluralUk(stats.games, "гра", "гри", "ігор")} value={stats.games} />
-          <Tile label={pluralUk(stats.wins, "перемога", "перемоги", "перемог")} value={stats.wins} />
-          <Tile label="разом" value={<Signed value={stats.netBuyins}>{fmtBuyins(stats.netBuyins)}</Signed>} />
+          <Tile label={t("label.games", { n: stats.games })} value={stats.games} />
+          <Tile label={t("label.wins", { n: stats.wins })} value={stats.wins} />
+          <Tile label={t("profile.total")} value={<Signed value={stats.netBuyins}>{fmtBuyins(stats.netBuyins)}</Signed>} />
         </div>
       </div>
 
       {stats.games === 0 ? (
         <Section>
-          <Empty icon="🃏" title="Ще немає завершених ігор">
-            Статистика з&apos;явиться після першої гри, де ви сиділи за столом під своїм Telegram.
+          <Empty icon="🃏" title={t("profile.noGames")}>
+            {t("profile.noGamesText")}
           </Empty>
         </Section>
       ) : (
         <>
-          <Section title="Форма">
+          <Section title={t("profile.form")}>
             <div className="flex gap-1.5 px-4 pt-4">
               {stats.form.map((f) => (
                 <Link
                   key={f.gameId}
                   href={`/g/${f.gameId}/summary`}
-                  title={f.type === "cash" ? fmtBuyins(f.netBuyins) : `${f.place}-е з ${f.entrants}`}
+                  title={f.type === "cash" ? fmtBuyins(f.netBuyins) : t("profile.placeOf", { n: f.place, of: f.entrants })}
                   className={`grid h-9 flex-1 place-items-center rounded-xl text-[13px] font-bold tabular ${
                     f.place === 1 ? "bg-gold/25 text-gold" : f.good ? "bg-pos/15 text-pos" : "bg-neg/12 text-neg"
                   }`}
@@ -88,35 +90,41 @@ export default function ProfilePage() {
               ))}
             </div>
             <FormChart timeline={stats.timeline} />
-            <div className="px-4 pb-3 text-[12px] text-hint">Сумарний результат у бай-інах після кожної гри. Ліворуч — найновіші ігри.</div>
+            <div className="px-4 pb-3 text-[12px] text-hint">{t("profile.formHint")}</div>
           </Section>
 
           <div className="mb-5 grid grid-cols-2 gap-2">
-            <Card title="Турніри" lines={[
-              [`${stats.tournament.games}`, pluralUk(stats.tournament.games, "турнір", "турніри", "турнірів")],
-              [`${stats.tournament.wins}`, "перемог"],
-              [`${stats.tournament.points}`, "очок"],
-              [stats.tournament.avgPlace == null ? "—" : String(stats.tournament.avgPlace).replace(".", ","), "сер. місце"],
-              [stats.tournament.games ? `${stats.tournament.itm}/${stats.tournament.games}` : "—", "у призах (ITM)"],
-            ]} />
-            <Card title="Кеш" lines={[
-              [`${stats.cash.games}`, pluralUk(stats.cash.games, "гра", "гри", "ігор")],
-              [fmtBuyins(stats.cash.netBuyins), "результат"],
-              [`${stats.cash.wins}`, "найкращих за столом"],
-              [pct(stats.itmRate), "ігор у плюсі/призах"],
-              [`${stats.bestStreak}`, "найдовша серія"],
-            ]} />
+            <Card
+              title={t("profile.tournaments")}
+              lines={[
+                [`${stats.tournament.games}`, t("label.tournaments", { n: stats.tournament.games })],
+                [`${stats.tournament.wins}`, t("profile.wins")],
+                [`${stats.tournament.points}`, t("profile.points")],
+                [stats.tournament.avgPlace == null ? "—" : fmtDecimal(stats.tournament.avgPlace), t("profile.avgPlace")],
+                [stats.tournament.games ? `${stats.tournament.itm}/${stats.tournament.games}` : "—", t("profile.itm")],
+              ]}
+            />
+            <Card
+              title={t("profile.cash")}
+              lines={[
+                [`${stats.cash.games}`, t("label.games", { n: stats.cash.games })],
+                [fmtBuyins(stats.cash.netBuyins), t("profile.result")],
+                [`${stats.cash.wins}`, t("profile.bestAtTable")],
+                [pct(stats.itmRate), t("profile.goodRate")],
+                [`${stats.bestStreak}`, t("profile.bestStreak")],
+              ]}
+            />
           </div>
 
           {stats.best && (
             <Link href={`/g/${stats.best.gameId}/summary`} className="glass mb-5 flex items-center gap-3 rounded-[28px] px-4 py-3.5">
               <span className="text-2xl">⭐</span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-semibold text-hint">Найкраща гра</span>
+                <span className="block text-[13px] font-semibold text-hint">{t("profile.bestGame")}</span>
                 <span className="font-display block truncate font-bold">{stats.best.gameName}</span>
               </span>
               <span className="text-right text-sm font-bold">
-                {stats.best.type === "cash" ? fmtBuyins(stats.best.netBuyins) : stats.best.place === 1 ? "🏆 1-е" : `${stats.best.place}-е`}
+                {stats.best.type === "cash" ? fmtBuyins(stats.best.netBuyins) : `${stats.best.place === 1 ? "🏆 " : ""}${t("common.place", { n: stats.best.place })}`}
               </span>
               <IconChevron />
             </Link>
@@ -124,15 +132,15 @@ export default function ProfilePage() {
         </>
       )}
 
-      <Section title="Досягнення">
+      <Section title={t("profile.achievements")}>
         <div className="grid grid-cols-2 gap-2 p-3">
           {stats.achievements.map((a) => {
-            const meta = ACHIEVEMENTS[a.id];
+
             return (
               <div key={a.id} className={`rounded-[22px] px-3 py-3 ${a.achieved ? "bg-gold/15" : "bg-fg/5 opacity-70"}`}>
-                <div className={`text-2xl ${a.achieved ? "" : "grayscale"}`}>{meta.icon}</div>
-                <div className="mt-1 text-sm font-bold">{meta.title}</div>
-                <div className="text-[12px] text-hint">{meta.text}</div>
+                <div className={`text-2xl ${a.achieved ? "" : "grayscale"}`}>{ACHIEVEMENT_ICONS[a.id]}</div>
+                <div className="mt-1 text-sm font-bold">{t(`ach.${a.id}.title`)}</div>
+                <div className="text-[12px] text-hint">{t(`ach.${a.id}.text`)}</div>
                 {a.progress && !a.achieved && (
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-fg/10" role="progressbar" aria-valuenow={a.progress.current} aria-valuemax={a.progress.target}>
                     <div className="h-full rounded-full bg-link" style={{ width: `${(a.progress.current / a.progress.target) * 100}%` }} />

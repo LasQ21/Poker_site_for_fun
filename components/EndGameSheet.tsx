@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useEffect, useState } from "react";
 import { fmtChips, fmtSigned } from "@/lib/format";
 import { useClosingConfirmation, useMainButton } from "@/lib/client/telegram";
@@ -19,6 +20,7 @@ export function EndGameSheet({
 }) {
   const [stacks, setStacks] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const t = useT();
   const { game } = state;
 
   // Prefill when opened; later live updates must not overwrite what the host typed.
@@ -41,13 +43,13 @@ export function EndGameSheet({
   }
 
   useClosingConfirmation(dirty);
-  const nativeButton = useMainButton(open ? { text: "🏁 Завершити гру", loading: busy, onClick: () => void confirm() } : null);
+  const nativeButton = useMainButton(open ? { text: t("game.end"), loading: busy, onClick: () => void confirm() } : null);
 
   return (
-    <Sheet open={open} onClose={onClose} title="Завершити гру">
+    <Sheet open={open} onClose={onClose} title={t("end.title")}>
       {game.type === "cash" ? (
         <>
-          <p className="mb-3 text-sm text-hint">Перевірте фінальні стеки — результат кожного = стек − бай-іни.</p>
+          <p className="mb-3 text-sm text-hint">{t("end.cashHint")}</p>
           <div className="mb-3 rounded-xl bg-fg/4">
             {state.players.map((p) => {
               const v = Number(stacks[String(p.id)]) || 0;
@@ -68,13 +70,13 @@ export function EndGameSheet({
             })}
           </div>
           <div className={`mb-4 rounded-xl px-3 py-2 text-sm ${diff === 0 ? "bg-pos/12 text-pos" : "bg-neg/12 text-neg"}`}>
-            За столом {fmtChips(total)} з {fmtChips(state.check.totalBuyins)} куплених
-            {diff === 0 ? " — все сходиться ✓" : ` — розбіжність ${fmtSigned(diff)}`}
+            {t("end.check", { total: fmtChips(total), buyins: fmtChips(state.check.totalBuyins) })}
+            {diff === 0 ? t("end.ok") : t("end.diff", { diff: fmtSigned(diff) })}
           </div>
         </>
       ) : (
         <>
-          <p className="mb-3 text-sm text-hint">Гравці, що ще в грі, отримають місця за кількістю фішок.</p>
+          <p className="mb-3 text-sm text-hint">{t("end.tournamentHint")}</p>
           <div className="mb-4 rounded-xl bg-fg/4">
             {state.results.map((r) => (
               <div key={r.playerId} className="flex items-center justify-between border-b border-sep px-3 py-2 last:border-b-0">
@@ -82,7 +84,7 @@ export function EndGameSheet({
                   <b className="mr-2 tabular">{r.place}.</b>
                   {r.displayName}
                 </span>
-                <span className="text-sm text-hint">{r.points} очк.</span>
+                <span className="text-sm text-hint">{t("common.pointsShort", { n: r.points ?? 0 })}</span>
               </div>
             ))}
           </div>
@@ -90,7 +92,7 @@ export function EndGameSheet({
       )}
       {!nativeButton && (
         <Button size="lg" className="mb-2 w-full" loading={busy} onClick={confirm}>
-          🏁 Завершити й показати підсумок
+          {t("end.button")}
         </Button>
       )}
     </Sheet>

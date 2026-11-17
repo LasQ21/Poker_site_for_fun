@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
-import { api, etagFetcher } from "./api";
+import { api, etagFetcher, responseTime } from "./api";
 import { applyOptimistic } from "./optimistic";
 import { haptic } from "./telegram";
 import type { GameStateDTO } from "@/lib/types";
@@ -10,7 +10,17 @@ import type { GameActionInput } from "@/lib/server/schemas";
 
 /** Polling used when the live stream is unavailable, and as a safety net while it is up. */
 const POLL_FALLBACK_MS = 3500;
-const POLL_LIVE_MS = 30_000;
+/** Safety-net polling while the stream is up, and the polling of finished games (they rarely change). */
+const POLL_SLOW_MS = 30_000;
+
+/**
+ * Server clock minus client clock, measured when the state arrived. Using the receive time (not
+ * "now") keeps it right for SWR-cached responses; null for locally built (optimistic) data.
+ */
+function clockOffsetOf(data: GameStateDTO | undefined): number | null {
+  const at = data ? responseTime(data) : undefined;
+  return data && at != null ? data.serverNow - at : null;
+}
 
 /**
  * Live game state: Server-Sent Events push "something changed" and the state is refetched with an
@@ -19,25 +29,29 @@ const POLL_LIVE_MS = 30_000;
 export function useGame(id: string, opts: { poll?: boolean } = {}) {
   const live = useLiveVersion(id, opts.poll !== false);
   const swr = useSWR<GameStateDTO>(`/api/games/${id}`, etagFetcher, {
+    // Finished games are still watched (slowly without the stream): the host may reopen them.
     refreshInterval: (data) =>
-      opts.poll === false || data?.game.status === "finished" ? 0 : live.connected ? POLL_LIVE_MS : POLL_FALLBACK_MS,
+      opts.poll === false ? 0 : live.connected || data?.game.status === "finished" ? POLL_SLOW_MS : POLL_FALLBACK_MS,
     revalidateOnFocus: true,
     dedupingInterval: 500,
   });
-  const [clockOffset, setClockOffset] = useState(0);
+  const [clockOffset, setClockOffset] = useState(() => clockOffsetOf(swr.data) ?? 0);
 
   useEffect(() => {
-    if (swr.data) setClockOffset(swr.data.serverNow - Date.now());
+    const offset = clockOffsetOf(swr.data);
+    if (offset != null) setClockOffset(offset);
   }, [swr.data]);
 
   const { mutate, data } = swr;
   const dataRef = useRef(data);
   dataRef.current = data;
 
-  // A pushed version newer than what we show → refetch.
+  // Every pushed `update` → refetch (a cheap 304 when only e.g. `idle` changed); on (re)connect
+  // (`hello`) only when the version differs from what we show.
   useEffect(() => {
-    if (live.version != null && live.version !== dataRef.current?.game.version) void mutate();
-  }, [live.version, live.tick, mutate]);
+    if (live.version == null) return;
+    if (live.event === "update" || live.version !== dataRef.current?.game.version) void mutate();
+  }, [live.version, live.event, live.tick, mutate]);
 
   const act = useCallback(
     async (action: GameActionInput) => {
@@ -65,30 +79,32 @@ export function useGame(id: string, opts: { poll?: boolean } = {}) {
   return { ...swr, clockOffset, act, live: live.connected };
 }
 
-/** Subscribes to /api/games/:id/stream while the page is visible. */
+/**
+ * Subscribes to /api/games/:id/stream while the page is visible — finished games included, so a
+ * reopened game shows up live for everyone.
+ */
 function useLiveVersion(id: string, enabled: boolean) {
-  const [state, setState] = useState<{ connected: boolean; version: number | null; tick: number }>({
-    connected: false,
-    version: null,
-    tick: 0,
-  });
+  const [state, setState] = useState<{
+    connected: boolean;
+    version: number | null;
+    event: "hello" | "update" | null;
+    tick: number;
+  }>({ connected: false, version: null, event: null, tick: 0 });
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || typeof EventSource === "undefined") return;
     let es: EventSource | null = null;
-    let finished = false;
 
     const onData = (e: MessageEvent) => {
       try {
         const v = JSON.parse(e.data) as { version: number; status: string } | null;
         if (!v) return;
-        if (v.status === "finished") finished = true;
-        setState((s) => ({ connected: true, version: v.version, tick: s.tick + 1 }));
-        if (finished) close();
+        const event = e.type === "update" ? "update" : "hello";
+        setState((s) => ({ connected: true, version: v.version, event, tick: s.tick + 1 }));
       } catch {}
     };
     const open = () => {
-      if (es || finished || document.visibilityState !== "visible") return;
+      if (es || document.visibilityState !== "visible") return;
       es = new EventSource(`/api/games/${id}/stream`);
       es.addEventListener("hello", onData as EventListener);
       es.addEventListener("update", onData as EventListener);

@@ -72,7 +72,17 @@ export interface GameListItemDTO {
 }
 
 export interface MeDTO {
-  user: { id: number; firstName: string; lastName: string | null; username: string | null; photoUrl: string | null } | null;
+  user: {
+    id: number;
+    firstName: string;
+    lastName: string | null;
+    username: string | null;
+    photoUrl: string | null;
+    /** Interface language chosen in settings (null = follow Telegram / the browser). */
+    lang: "uk" | "en" | null;
+    /** Telegram client language reported at the last sign-in. */
+    languageCode: string | null;
+  } | null;
   chats: { id: number; publicId: string; title: string }[];
   botUsername: string | null;
   devLogin: boolean;

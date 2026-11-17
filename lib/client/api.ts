@@ -32,6 +32,16 @@ export async function fetcher<T = unknown>(url: string): Promise<T> {
 }
 
 const etagCache = new Map<string, { etag: string; data: unknown }>();
+const receivedAt = new WeakMap<object, number>();
+
+/**
+ * Client time (ms) at which `data` arrived from the network, for objects returned by
+ * `etagFetcher`. Stays with the object, so SWR-cached data (and data reused on 304) keeps the
+ * time of the response it came from; undefined for objects built locally (e.g. optimistic data).
+ */
+export function responseTime(data: unknown): number | undefined {
+  return data && typeof data === "object" ? receivedAt.get(data) : undefined;
+}
 
 /**
  * Conditional GET: sends the last ETag and reuses the previous data on 304. Returning the same
@@ -45,6 +55,7 @@ export async function etagFetcher<T = unknown>(url: string): Promise<T> {
   });
   if (res.status === 304 && prev) return prev.data as T;
   const data = await handle<T>(res);
+  if (data && typeof data === "object") receivedAt.set(data, Date.now());
   const etag = res.headers.get("etag");
   if (etag) etagCache.set(url, { etag, data });
   else etagCache.delete(url);

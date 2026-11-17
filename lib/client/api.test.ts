@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, etagFetcher } from "./api";
+import { ApiError, etagFetcher, responseTime } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,6 +24,28 @@ describe("etagFetcher", () => {
     expect(calls[0]["If-None-Match"]).toBeUndefined();
     expect(calls[1]["If-None-Match"]).toBe('W/"g1-u0"');
     expect(calls[2]["If-None-Match"]).toBe('W/"g1-u0"');
+  });
+
+  it("remembers when each 200 response arrived, also for data reused on 304", async () => {
+    const responses = [
+      new Response(JSON.stringify({ v: 1 }), { status: 200, headers: { ETag: 'W/"t1"' } }),
+      new Response(null, { status: 304 }),
+      new Response(JSON.stringify({ v: 2 }), { status: 200, headers: { ETag: 'W/"t2"' } }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => responses.shift()!));
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    const a = await etagFetcher<{ v: number }>("/api/games/t");
+    now.mockReturnValue(61_000);
+    const b = await etagFetcher<{ v: number }>("/api/games/t");
+    now.mockReturnValue(90_000);
+    const c = await etagFetcher<{ v: number }>("/api/games/t");
+    now.mockRestore();
+    expect(b).toBe(a);
+    expect(responseTime(a)).toBe(1_000);
+    expect(responseTime(c)).toBe(90_000);
+    expect(responseTime({ v: 1 })).toBeUndefined();
+    expect(responseTime(undefined)).toBeUndefined();
   });
 
   it("translates API errors by code", async () => {

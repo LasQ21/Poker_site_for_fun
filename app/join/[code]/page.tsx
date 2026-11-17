@@ -3,6 +3,7 @@
 import { useT } from "@/lib/i18n/client";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { markReplace } from "@/lib/client/nav";
 import { useMe, useToast } from "@/components/AppShell";
 import { joinMessage, joinWithCode } from "@/components/JoinByCode";
 import { LoginPanel } from "@/components/LoginPanel";
@@ -24,6 +25,8 @@ export default function JoinCodePage() {
     joinWithCode(code)
       .then((r) => {
         toast(joinMessage(r));
+        // The join page replaces itself: "back" from the game must not return here.
+        markReplace(`/g/${r.gameId}`);
         router.replace(`/g/${r.gameId}`);
       })
       .catch((e: Error) => setError(e.message));

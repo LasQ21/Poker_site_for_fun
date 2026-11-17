@@ -1,6 +1,8 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { mutate } from "swr";
+import type { MeDTO } from "@/lib/types";
 import { cloudGet, cloudSet } from "./telegram";
 
 export type LangSetting = "auto" | "uk" | "en";
@@ -19,6 +21,8 @@ export const DEFAULT_SETTINGS: Settings = { sound: true, vibration: true, lang: 
 const KEY = "settings";
 let current: Settings = DEFAULT_SETTINGS;
 let loaded = false;
+/** Settings came from storage (or were changed by the user): `current` is not just the defaults. */
+let ready = false;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -48,13 +52,24 @@ export async function loadSettings() {
   if (loaded) return current;
   loaded = true;
   current = parse(await cloudGet(KEY));
+  ready = true;
   emit();
   return current;
 }
 
 export async function updateSettings(patch: Partial<Settings>) {
   current = { ...current, ...patch };
+  ready = true;
   emit();
+  // Keep the cached /api/me in step with the language the settings page also PATCHes there.
+  const lang = patch.lang;
+  if (lang) {
+    void mutate<MeDTO>(
+      "/api/me",
+      (me) => (me?.user ? { ...me, user: { ...me.user, lang: lang === "auto" ? null : lang } } : me),
+      { revalidate: false },
+    );
+  }
   await cloudSet(KEY, JSON.stringify(current));
 }
 
@@ -66,5 +81,17 @@ export function useSettings(): Settings {
     },
     () => current,
     () => DEFAULT_SETTINGS,
+  );
+}
+
+/** True once the stored settings have been loaded (until then `useSettings()` returns defaults). */
+export function useSettingsReady(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => ready,
+    () => false,
   );
 }

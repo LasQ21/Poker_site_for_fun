@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/client/api";
 import { closeMiniApp, getWebApp } from "@/lib/client/telegram";
-import { recordNavigation } from "@/lib/client/nav";
-import { loadSettings, useSettings } from "@/lib/client/settings";
-import { pickLang } from "@/lib/i18n";
+import { markReplace, recordNavigation } from "@/lib/client/nav";
+import { loadSettings, useSettings, useSettingsReady } from "@/lib/client/settings";
+import { cacheLang, readCachedLang, resolveLang } from "@/lib/client/lang";
 import { setClientLang, useT } from "@/lib/i18n/client";
 import type { MeDTO } from "@/lib/types";
 import { IconCards, IconHistory, IconSettings, IconTrophy, IconUser } from "./icons";
@@ -34,7 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<string | null>(null);
   const [miniApp, setMiniApp] = useState(false);
   const clearToast = useCallback(() => setToast(null), []);
-  const { data: me } = useMe();
+  const { data: me, error: meError } = useMe();
 
   useEffect(() => {
     recordNavigation(pathname);
@@ -44,13 +44,28 @@ export function AppShell({ children }: { children: ReactNode }) {
     void loadSettings();
   }, []);
 
-  // Interface language: explicit setting → Telegram client language → browser language.
+  // Interface language: explicit setting → choice stored on the server → Telegram client language →
+  // browser language. Until the settings (and, for "auto", /api/me) are known, the language cached
+  // from the last visit is used, else the best guess. A layout effect: applied right after
+  // hydration (which must match the server's Ukrainian HTML), before the first client paint.
   const settings = useSettings();
+  const settingsReady = useSettingsReady();
+  const meSettled = me !== undefined || meError !== undefined;
+  const userLang = me?.user?.lang;
+  const userLanguageCode = me?.user?.languageCode;
   const t = useT();
-  useEffect(() => {
-    const tgCode = getWebApp()?.initDataUnsafe.user?.language_code;
-    setClientLang(settings.lang !== "auto" ? settings.lang : pickLang(tgCode, ...(navigator.languages ?? [navigator.language])));
-  }, [settings.lang]);
+  useLayoutEffect(() => {
+    const lang = resolveLang({
+      setting: settings.lang,
+      userLang,
+      telegramCode: getWebApp()?.initDataUnsafe.user?.language_code || userLanguageCode,
+      browser: navigator.languages?.length ? navigator.languages : [navigator.language],
+    });
+    if (settingsReady && (settings.lang !== "auto" || meSettled)) {
+      setClientLang(lang);
+      cacheLang(lang);
+    } else setClientLang(readCachedLang() ?? lang);
+  }, [settings.lang, settingsReady, userLang, userLanguageCode, meSettled]);
 
   useEffect(() => {
     // Real refraction only where backdrop-filter:url() works (Chromium, not iOS WebKit).
@@ -82,9 +97,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     const sp = wa.initDataUnsafe.start_param;
     if (sp && !sessionStorage.getItem(`sp:${sp}`)) {
       sessionStorage.setItem(`sp:${sp}`, "1");
-      if (sp.startsWith("lb_")) router.replace(`/leaderboard/${sp.slice(3)}`);
-      else if (/^\d{4}$/.test(sp)) router.replace(`/join/${sp}`);
-      else if (/^[A-Za-z0-9_-]{4,40}$/.test(sp)) router.replace(`/g/${sp}`);
+      // Replaces the current entry: BackButton then falls back instead of going "back" to nothing.
+      const to = sp.startsWith("lb_")
+        ? `/leaderboard/${sp.slice(3)}`
+        : /^\d{4}$/.test(sp)
+          ? `/join/${sp}`
+          : /^[A-Za-z0-9_-]{4,40}$/.test(sp)
+            ? `/g/${sp}`
+            : null;
+      if (to) {
+        markReplace(to);
+        router.replace(to);
+      }
     }
     return () => wa.offEvent("themeChanged", applyTheme);
   }, [router]);

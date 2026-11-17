@@ -228,4 +228,42 @@ d("game service (integration)", () => {
     expect(after.form[0]).toMatchObject({ gameId: game.id, place: 1, entrants: 3 });
     expect(after.achievements.find((a) => a.id === "first_win")?.achieved).toBe(true);
   });
+
+  it("probes versions and builds per-viewer ETags", async () => {
+    const { game, pid } = await tournament();
+    const v1 = (await G.gameVersion(game.id))!;
+    expect(G.gameEtag(v1, anna.id)).toBe(G.gameEtag(v1, anna.id));
+    expect(G.gameEtag(v1, anna.id)).not.toBe(G.gameEtag(v1, ivan.id));
+    expect(G.gameEtag(v1, null)).not.toBe(G.gameEtag({ ...v1, idle: true }, null));
+    await G.setStack(game.id, pid(anna), anna, 1200);
+    const v2 = (await G.gameVersion(game.id))!;
+    expect(v2.version).toBe(v1.version + 1);
+    expect(G.gameEtag(v2, anna.id)).not.toBe(G.gameEtag(v1, anna.id));
+    expect(await G.gameVersion("missing-game")).toBeNull();
+  });
+
+  it("lets only group admins or hosts of the group's games manage seasons", async () => {
+    const { db } = await import("@/lib/db");
+    const { chats } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const L = await import("./leaderboard");
+    const U = await import("./users");
+    const CHAT = -100555;
+    await db.delete(chats).where(eq(chats.id, CHAT));
+    await U.upsertChat(CHAT, "Seasons test");
+    for (const u of [host, anna, guest]) await U.touchMember(CHAT, u.id);
+    // Nobody has hosted a game here yet and there is no bot token to ask Telegram about admins.
+    await expect(L.startSeason(CHAT, anna.id, "Осінь")).rejects.toMatchObject({ status: 403 });
+    await G.createGame(host, { type: "cash", startingStack: 100, chatId: CHAT });
+    const s = await L.startSeason(CHAT, host.id, "Осінь");
+    expect(s.isActive).toBe(true);
+    await expect(L.endSeason(CHAT, guest.id)).rejects.toMatchObject({ status: 403 });
+    expect((await L.endSeason(CHAT, host.id))?.id).toBe(s.id);
+    // Leaving the group revokes membership (and with it the right to create games there).
+    await U.removeMember(CHAT, host.id);
+    await expect(G.createGame(host, { type: "cash", startingStack: 100, chatId: CHAT })).rejects.toMatchObject({ status: 403 });
+    await U.forgetChatMembers(CHAT);
+    expect(await L.isChatMember(CHAT, anna.id)).toBe(false);
+    await db.delete(chats).where(eq(chats.id, CHAT));
+  });
 });

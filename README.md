@@ -39,6 +39,8 @@ npm run lint && npm run typecheck && npm test
 TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/poker npm test   # + інтеграційні тести (бот, сервіс ігор)
 ```
 
+CI (`.github/workflows/ci.yml`): Node 22 + Postgres 16 → міграції, lint, typecheck, усі тести (включно з інтеграційними), `next build`.
+
 ## Деплой (Vercel)
 
 1. Імпортувати репозиторій у Vercel, підключити **Neon** і **Upstash QStash** через Marketplace

@@ -17,6 +17,8 @@ export interface GameDTO {
   pausedRemainingMs: number | null;
   reminderIntervalMin: number | null;
   joinCode: string | null;
+  /** Bumped by every change; compared with versions pushed by the live stream. */
+  version: number;
   createdAt: string;
   finishedAt: string | null;
 }

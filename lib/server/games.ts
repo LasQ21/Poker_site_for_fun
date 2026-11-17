@@ -184,7 +184,7 @@ async function getPlayer(q: DbOrTx, gameId: string, playerId: number): Promise<P
 /** Totals and current stacks for the players of several games at once. */
 async function playerAggregates(gameIds: string[], q: DbOrTx = db) {
   if (!gameIds.length) return { totals: new Map(), stacks: new Map() };
-  const totalsRows = await q
+  const totalsQuery = q
     .select({
       playerId: buyins.playerId,
       chips: sql<number>`coalesce(sum(${buyins.chips}), 0)::int`,
@@ -193,7 +193,7 @@ async function playerAggregates(gameIds: string[], q: DbOrTx = db) {
     .from(buyins)
     .where(inArray(buyins.gameId, gameIds))
     .groupBy(buyins.playerId);
-  const stackRows = await q
+  const stackQuery = q
     .selectDistinctOn([stackSnapshots.playerId], {
       playerId: stackSnapshots.playerId,
       chips: stackSnapshots.chips,
@@ -203,6 +203,7 @@ async function playerAggregates(gameIds: string[], q: DbOrTx = db) {
     .where(inArray(stackSnapshots.gameId, gameIds))
     // Latest by insertion order: ids are allocated under the game lock, timestamps may tie.
     .orderBy(stackSnapshots.playerId, desc(stackSnapshots.id));
+  const [totalsRows, stackRows] = await Promise.all([totalsQuery, stackQuery]);
   return {
     totals: new Map<number, { chips: number; count: number }>(totalsRows.map((r) => [r.playerId, r])),
     stacks: new Map<number, { chips: number; recordedAt: Date }>(stackRows.map((r) => [r.playerId, r])),
@@ -239,23 +240,25 @@ export async function loadGameState(gameId: string, q: DbOrTx = db): Promise<Gam
   const game = await getGame(gameId, q);
   const idle = isIdle(game);
   if (q === db && game.status === "active" && !game.joinCode && !idle) game.joinCode = await assignJoinCode(game.id);
-  const [hostRow] = await q.select().from(users).where(eq(users.id, game.hostUserId)).limit(1);
-  const chatRow = game.chatId
-    ? (await q.select().from(chats).where(eq(chats.id, game.chatId)).limit(1))[0]
-    : undefined;
-  const plist = await q.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id));
-  const agg = await playerAggregates([gameId], q);
+  // Independent reads run concurrently (on a pooled connection each; queued inside a transaction).
+  const [[hostRow], chatRows, plist, agg, blist, snaps] = await Promise.all([
+    q.select().from(users).where(eq(users.id, game.hostUserId)).limit(1),
+    game.chatId ? q.select().from(chats).where(eq(chats.id, game.chatId)).limit(1) : Promise.resolve([]),
+    q.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id)),
+    playerAggregates([gameId], q),
+    q
+      .select({ id: buyins.id, playerId: buyins.playerId, chips: buyins.chips, kind: buyins.kind, createdAt: buyins.createdAt })
+      .from(buyins)
+      .where(eq(buyins.gameId, gameId))
+      .orderBy(asc(buyins.createdAt), asc(buyins.id)),
+    q
+      .select({ playerId: stackSnapshots.playerId, chips: stackSnapshots.chips, recordedAt: stackSnapshots.recordedAt })
+      .from(stackSnapshots)
+      .where(eq(stackSnapshots.gameId, gameId))
+      .orderBy(asc(stackSnapshots.id)),
+  ]);
+  const chatRow = chatRows[0];
   const pviews = plist.map((p) => toPlayerView(p, agg));
-  const blist = await q
-    .select({ id: buyins.id, playerId: buyins.playerId, chips: buyins.chips, kind: buyins.kind, createdAt: buyins.createdAt })
-    .from(buyins)
-    .where(eq(buyins.gameId, gameId))
-    .orderBy(asc(buyins.createdAt), asc(buyins.id));
-  const snaps = await q
-    .select({ playerId: stackSnapshots.playerId, chips: stackSnapshots.chips, recordedAt: stackSnapshots.recordedAt })
-    .from(stackSnapshots)
-    .where(eq(stackSnapshots.gameId, gameId))
-    .orderBy(asc(stackSnapshots.id));
 
   return {
     game,
@@ -268,6 +271,21 @@ export async function loadGameState(gameId: string, q: DbOrTx = db): Promise<Gam
     check: chipCheck(pviews.filter((p) => p.status !== "left" || p.currentChips > 0)),
     idle,
   };
+}
+
+/** Cheap change probe for ETags and the live stream: one indexed row, no joins. */
+export async function gameVersion(gameId: string) {
+  const [g] = await db
+    .select({ version: games.version, status: games.status, updatedAt: games.updatedAt })
+    .from(games)
+    .where(eq(games.id, gameId))
+    .limit(1);
+  return g ? { version: g.version, status: g.status, idle: isIdle(g) } : null;
+}
+
+/** Weak ETag of a game as seen by one viewer (role and redaction depend on who is asking). */
+export function gameEtag(v: { version: number; idle: boolean }, viewerId: number | null | undefined) {
+  return `W/"g${v.version}-u${viewerId ?? 0}${v.idle ? "-i" : ""}"`;
 }
 
 // ---------------------------------------------------------------- permissions

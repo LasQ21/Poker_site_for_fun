@@ -7,7 +7,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Poker Tracker",
   icons: { icon: "/favicon.svg" },
-  description: "Облік стеків у домашньому покері: кеш і турніри, таймер блайндів, графік і лідерборд.",
+  description: "Poker Tracker — стеки, блайнди й лідерборд для домашнього покеру · stacks, blinds and leaderboards for home poker.",
 };
 
 // Self-hosted at build time: no request to Google from Telegram's WebView, no render-blocking CSS.

@@ -34,9 +34,10 @@ export async function POST(req: Request) {
     allowed_updates: ["message", "callback_query", "my_chat_member"],
     drop_pending_updates: true,
   });
-  // Ukrainian is the default; Telegram clients in English get English commands and description.
-  for (const lang of ["uk", "en"] as const) {
-    const language_code = lang === "uk" ? undefined : lang;
+  // English is the default (Telegram clients in any unsupported language get English, matching pickLang);
+  // Ukrainian clients get Ukrainian commands and description.
+  for (const lang of ["en", "uk"] as const) {
+    const language_code = lang === "en" ? undefined : lang;
     results[`privateCommands_${lang}`] = await api.setMyCommands(botCommands("private", lang), { scope: { type: "all_private_chats" }, language_code });
     results[`groupCommands_${lang}`] = await api.setMyCommands(botCommands("group", lang), { scope: { type: "all_group_chats" }, language_code });
     results[`description_${lang}`] = await api
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
       .catch((e: Error) => e.message);
   }
   results.menuButton = await api.setChatMenuButton({
-    menu_button: { type: "web_app", text: translate("uk", "bot.menuButton"), web_app: { url: base } },
+    menu_button: { type: "web_app", text: translate("en", "bot.menuButton"), web_app: { url: base } },
   });
   results.webhookInfo = await api.getWebhookInfo();
   return Response.json({ ok: true, appUrl: base, results });

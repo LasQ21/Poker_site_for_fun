@@ -29,27 +29,31 @@ export function fmtBuyins(n: number, lang: Lang = fmtLang): string {
   return v === 0 ? `0 ${unit}` : `${v > 0 ? "+" : "−"}${s} ${unit}`;
 }
 
-export function fmtDate(d: Date | string | null | undefined, lang: Lang = fmtLang): string {
+/**
+ * Date/time formatters. `timeZone` defaults to the runtime's zone (the user's on the client);
+ * server-side callers (the bot) pass an explicit zone so output doesn't depend on the server.
+ */
+export function fmtDate(d: Date | string | null | undefined, lang: Lang = fmtLang, timeZone?: string): string {
   if (!d) return "";
-  return new Date(d).toLocaleDateString(localeOf(lang), { day: "numeric", month: "short", year: "numeric" });
+  return new Date(d).toLocaleDateString(localeOf(lang), { day: "numeric", month: "short", year: "numeric", timeZone });
 }
 
-export function fmtDateShort(d: Date | string | null | undefined, lang: Lang = fmtLang): string {
+export function fmtDateShort(d: Date | string | null | undefined, lang: Lang = fmtLang, timeZone?: string): string {
   if (!d) return "";
-  return new Date(d).toLocaleDateString(localeOf(lang), { day: "numeric", month: "short" });
+  return new Date(d).toLocaleDateString(localeOf(lang), { day: "numeric", month: "short", timeZone });
 }
 
-export function fmtDateTime(d: Date | string | null | undefined, lang: Lang = fmtLang): string {
+export function fmtDateTime(d: Date | string | null | undefined, lang: Lang = fmtLang, timeZone?: string): string {
   if (!d) return "";
-  return new Date(d).toLocaleString(localeOf(lang), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return new Date(d).toLocaleString(localeOf(lang), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone });
 }
 
-export function fmtTime(t: number | Date, lang: Lang = fmtLang): string {
-  return new Date(t).toLocaleTimeString(localeOf(lang), { hour: "2-digit", minute: "2-digit" });
+export function fmtTime(t: number | Date, lang: Lang = fmtLang, timeZone?: string): string {
+  return new Date(t).toLocaleTimeString(localeOf(lang), { hour: "2-digit", minute: "2-digit", timeZone });
 }
 
-export function fmtMonth(d: Date | string, lang: Lang = fmtLang): string {
-  return new Date(d).toLocaleDateString(localeOf(lang), { month: "long", year: "numeric" });
+export function fmtMonth(d: Date | string, lang: Lang = fmtLang, timeZone?: string): string {
+  return new Date(d).toLocaleDateString(localeOf(lang), { month: "long", year: "numeric", timeZone });
 }
 
 export function fmtDecimal(n: number, lang: Lang = fmtLang): string {

@@ -98,8 +98,8 @@ export default function ProfilePage() {
               title={t("profile.tournaments")}
               lines={[
                 [`${stats.tournament.games}`, t("label.tournaments", { n: stats.tournament.games })],
-                [`${stats.tournament.wins}`, t("profile.wins")],
-                [`${stats.tournament.points}`, t("profile.points")],
+                [`${stats.tournament.wins}`, t("label.wins", { n: stats.tournament.wins })],
+                [`${stats.tournament.points}`, t("label.points", { n: stats.tournament.points })],
                 [stats.tournament.avgPlace == null ? "—" : fmtDecimal(stats.tournament.avgPlace), t("profile.avgPlace")],
                 [stats.tournament.games ? `${stats.tournament.itm}/${stats.tournament.games}` : "—", t("profile.itm")],
               ]}
@@ -109,7 +109,7 @@ export default function ProfilePage() {
               lines={[
                 [`${stats.cash.games}`, t("label.games", { n: stats.cash.games })],
                 [fmtBuyins(stats.cash.netBuyins), t("profile.result")],
-                [`${stats.cash.wins}`, t("profile.bestAtTable")],
+                [`${stats.cash.wins}`, t("label.bestAtTable", { n: stats.cash.wins })],
                 [pct(stats.itmRate), t("profile.goodRate")],
                 [`${stats.bestStreak}`, t("profile.bestStreak")],
               ]}

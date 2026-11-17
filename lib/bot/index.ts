@@ -1,7 +1,7 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { BotCommand, UserFromGetMe } from "grammy/types";
 import { appUrl, config, gameWebUrl, miniAppLink, setDetectedBotUsername } from "@/lib/config";
-import { fmtBuyins, fmtChips, fmtDate } from "@/lib/format";
+import { fmtBuyins, fmtChips, fmtDate, fmtSigned } from "@/lib/format";
 import { parseChips } from "@/lib/game/parse";
 import { makeT, translate, type Key, type Lang, type T } from "@/lib/i18n";
 import { AppError } from "@/lib/server/errors";
@@ -10,6 +10,9 @@ import { activeSeason, endSeason, loadLeaderboard, startSeason } from "@/lib/ser
 import { forgetChatMembers, langOfUser, removeMember, touchMember, upsertChat, upsertUser, userLang } from "@/lib/server/users";
 import { escapeHtml, sendCsv } from "@/lib/telegram/api";
 import type { User } from "@/lib/db/schema";
+
+/** Dates in bot messages are shown in the group's (Ukrainian) time zone, not the server's. */
+const BOT_TZ = "Europe/Kyiv";
 
 /** Context with the reply language: private chats use the sender's, groups the active game host's. */
 type Ctx = Context & { lang: Lang; t: T; user?: User };
@@ -250,7 +253,7 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     const me = state.results.find((r) => r.playerId === p.id);
     const net =
       me && game.type === "cash"
-        ? ctx.t("bot.stackNet", { net: `${me.netChips >= 0 ? "+" : ""}${fmtChips(me.netChips)}`, bi: fmtBuyins(me.netBuyins, ctx.lang) })
+        ? ctx.t("bot.stackNet", { net: fmtSigned(me.netChips), bi: fmtBuyins(me.netBuyins, ctx.lang) })
         : "";
     await ctx.reply(ctx.t("bot.stackSet", { name: escapeHtml(p.displayName), chips: fmtChips(chips) }) + net, { parse_mode: "HTML" });
   }));
@@ -358,7 +361,7 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     }
     const s = await activeSeason(chatId);
     await ctx.reply(
-      s ? ctx.t("bot.seasonCurrent", { name: escapeHtml(s.name), date: fmtDate(s.startsAt, ctx.lang) }) : ctx.t("bot.seasonNone"),
+      s ? ctx.t("bot.seasonCurrent", { name: escapeHtml(s.name), date: fmtDate(s.startsAt, ctx.lang, BOT_TZ) }) : ctx.t("bot.seasonNone"),
       { parse_mode: "HTML" },
     );
   }));
@@ -373,7 +376,7 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     }
     const lines = list.map(
       (g) =>
-        `• <a href="${gameWebUrl(g.id)}/summary">${escapeHtml(g.name)}</a> — ${fmtDate(g.finishedAt, ctx.lang)}, ${ctx.t("common.players", { n: g.playerCount })}` +
+        `• <a href="${gameWebUrl(g.id)}/summary">${escapeHtml(g.name)}</a> — ${fmtDate(g.finishedAt, ctx.lang, BOT_TZ)}, ${ctx.t("common.players", { n: g.playerCount })}` +
         (g.winner ? ctx.t("bot.historyWinner", { name: escapeHtml(g.winner) }) : ""),
     );
     await ctx.reply(`${ctx.t("bot.historyTitle")}\n\n${lines.join("\n")}`, {

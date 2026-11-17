@@ -50,8 +50,8 @@ export default function SummaryPage() {
         )}
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <Stat label={t("label.players", { n: state.players.length })} value={state.players.length} />
-          <Stat label={t("summary.statRebuys")} value={rebuys} />
-          <Stat label={t("summary.statMinutes")} value={durationMin} />
+          <Stat label={t("label.rebuys", { n: rebuys })} value={rebuys} />
+          <Stat label={t("label.minutes", { n: durationMin })} value={durationMin} />
         </div>
       </div>
 

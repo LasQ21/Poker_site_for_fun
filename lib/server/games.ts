@@ -83,8 +83,13 @@ export function isIdle(game: Pick<Game, "status" | "updatedAt">, now = Date.now(
   return game.status === "active" && now - game.updatedAt.getTime() > IDLE_MS;
 }
 
-/** Gives an active game a fresh 4-digit code (1000–9999) not used by any other active game. */
-export async function assignJoinCode(gameId: string): Promise<string> {
+/**
+ * Gives an active game without a code a fresh 4-digit code (1000–9999) not used by any other active
+ * game, and returns the game's code. Safe under concurrency: the code is only written while the game
+ * has none (conditional UPDATE), so parallel callers all end up with the same code. Bumps `version`
+ * so clients holding an ETag see the new code. Returns null if the game is no longer active.
+ */
+export async function assignJoinCode(gameId: string): Promise<string | null> {
   // Codes of abandoned games are released first, so the pool never fills up with forgotten games.
   await db
     .update(games)
@@ -107,8 +112,15 @@ export async function assignJoinCode(gameId: string): Promise<string> {
     do code = String(randomInt(1000, 10000));
     while (used.has(code));
     try {
-      await db.update(games).set({ joinCode: code }).where(eq(games.id, gameId));
-      return code;
+      const [set] = await db
+        .update(games)
+        .set({ joinCode: code, version: sql`${games.version} + 1` })
+        .where(and(eq(games.id, gameId), isNull(games.joinCode), eq(games.status, "active")))
+        .returning({ code: games.joinCode });
+      if (set) return set.code;
+      // Someone else assigned a code first (or the game ended): use what is there now.
+      const [cur] = await db.select({ code: games.joinCode }).from(games).where(eq(games.id, gameId)).limit(1);
+      return cur?.code ?? null;
     } catch (e) {
       if (!isUniqueViolation(e)) throw e;
     }
@@ -116,10 +128,10 @@ export async function assignJoinCode(gameId: string): Promise<string> {
   throw new AppError(503, "errors.codeGenFailed");
 }
 
-export async function findActiveGameByCode(code: string): Promise<Game> {
+export async function findActiveGameByCode(code: string, q: DbOrTx = db): Promise<Game> {
   const c = code.trim();
   if (!JOIN_CODE_RE.test(c)) throw badRequest("errors.codeFormat");
-  const [g] = await db
+  const [g] = await q
     .select()
     .from(games)
     .where(
@@ -134,26 +146,35 @@ export async function findActiveGameByCode(code: string): Promise<Game> {
 export const JOIN_MAX_FAILS = 10;
 export const JOIN_WINDOW_MS = 10 * 60 * 1000;
 
-/** `findActiveGameByCode` with a per-user limit on failed attempts (HTTP 429 when exceeded). */
+/**
+ * `findActiveGameByCode` with a per-user limit on failed attempts (HTTP 429 when exceeded).
+ * Count, lookup and the failure record run in one transaction under a per-user advisory lock, so a
+ * burst of parallel guesses is serialized and cannot slip past the limit.
+ */
 export async function findGameByCodeLimited(userId: number, code: string): Promise<Game> {
-  const [{ fails }] = await db
-    .select({ fails: sql<number>`count(*)::int` })
-    .from(joinAttempts)
-    .where(and(eq(joinAttempts.userId, userId), gt(joinAttempts.createdAt, new Date(Date.now() - JOIN_WINDOW_MS))));
-  if (Number(fails) >= JOIN_MAX_FAILS) {
-    throw new AppError(429, "errors.tooManyAttempts");
-  }
-  try {
-    return await findActiveGameByCode(code);
-  } catch (e) {
-    if (e instanceof AppError && e.status === 404) {
-      await db.insert(joinAttempts).values({ userId });
-      if (Math.random() < 0.05) {
-        await db.delete(joinAttempts).where(lt(joinAttempts.createdAt, new Date(Date.now() - 24 * 3600_000)));
-      }
+  const c = code.trim();
+  if (!JOIN_CODE_RE.test(c)) throw badRequest("errors.codeFormat");
+  const outcome = await db.transaction(async (tx): Promise<{ game: Game } | { error: AppError }> => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('join_attempts'), hashtext(${String(userId)}))`);
+    const [{ fails }] = await tx
+      .select({ fails: sql<number>`count(*)`.mapWith(Number) })
+      .from(joinAttempts)
+      .where(and(eq(joinAttempts.userId, userId), gt(joinAttempts.createdAt, new Date(Date.now() - JOIN_WINDOW_MS))));
+    if (fails >= JOIN_MAX_FAILS) return { error: new AppError(429, "errors.tooManyAttempts") };
+    try {
+      return { game: await findActiveGameByCode(c, tx) };
+    } catch (e) {
+      if (!(e instanceof AppError && e.status === 404)) throw e;
+      // Recorded and committed before the 404 goes out.
+      await tx.insert(joinAttempts).values({ userId });
+      return { error: e };
     }
-    throw e;
+  });
+  if ("game" in outcome) return outcome.game;
+  if (outcome.error.status === 404 && Math.random() < 0.05) {
+    await db.delete(joinAttempts).where(lt(joinAttempts.createdAt, new Date(Date.now() - 24 * 3600_000)));
   }
+  throw outcome.error;
 }
 
 /**
@@ -191,29 +212,43 @@ async function getPlayer(q: DbOrTx, gameId: string, playerId: number): Promise<P
   return p;
 }
 
+/**
+ * Runs independent reads: concurrently on the pool (`db`), one after another on a transaction —
+ * a transaction is a single connection, and pg must not get a query while one is running.
+ */
+async function readAll<T extends unknown[]>(q: DbOrTx, ...tasks: { [K in keyof T]: () => PromiseLike<T[K]> }): Promise<T> {
+  if (q === db) return (await Promise.all(tasks.map((t) => t()))) as T;
+  const out: unknown[] = [];
+  for (const t of tasks) out.push(await t());
+  return out as T;
+}
+
 /** Totals and current stacks for the players of several games at once. */
 async function playerAggregates(gameIds: string[], q: DbOrTx = db) {
   if (!gameIds.length) return { totals: new Map(), stacks: new Map() };
-  const totalsQuery = q
-    .select({
-      playerId: buyins.playerId,
-      chips: sql<number>`coalesce(sum(${buyins.chips}), 0)::int`,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(buyins)
-    .where(inArray(buyins.gameId, gameIds))
-    .groupBy(buyins.playerId);
-  const stackQuery = q
-    .selectDistinctOn([stackSnapshots.playerId], {
-      playerId: stackSnapshots.playerId,
-      chips: stackSnapshots.chips,
-      recordedAt: stackSnapshots.recordedAt,
-    })
-    .from(stackSnapshots)
-    .where(inArray(stackSnapshots.gameId, gameIds))
-    // Latest by insertion order: ids are allocated under the game lock, timestamps may tie.
-    .orderBy(stackSnapshots.playerId, desc(stackSnapshots.id));
-  const [totalsRows, stackRows] = await Promise.all([totalsQuery, stackQuery]);
+  const totalsQuery = () =>
+    q
+      .select({
+        playerId: buyins.playerId,
+        // bigint: sums of int columns can exceed 2^31.
+        chips: sql<number>`coalesce(sum(${buyins.chips}), 0)::bigint`.mapWith(Number),
+        count: sql<number>`count(*)`.mapWith(Number),
+      })
+      .from(buyins)
+      .where(inArray(buyins.gameId, gameIds))
+      .groupBy(buyins.playerId);
+  const stackQuery = () =>
+    q
+      .selectDistinctOn([stackSnapshots.playerId], {
+        playerId: stackSnapshots.playerId,
+        chips: stackSnapshots.chips,
+        recordedAt: stackSnapshots.recordedAt,
+      })
+      .from(stackSnapshots)
+      .where(inArray(stackSnapshots.gameId, gameIds))
+      // Latest by insertion order: ids are allocated under the game lock, timestamps may tie.
+      .orderBy(stackSnapshots.playerId, desc(stackSnapshots.id));
+  const [totalsRows, stackRows] = await readAll(q, totalsQuery, stackQuery);
   return {
     totals: new Map<number, { chips: number; count: number }>(totalsRows.map((r) => [r.playerId, r])),
     stacks: new Map<number, { chips: number; recordedAt: Date }>(stackRows.map((r) => [r.playerId, r])),
@@ -247,26 +282,33 @@ function toPlayerView(
 
 /** Full game state. Outside transactions it also (re)assigns a join code to active games without one. */
 export async function loadGameState(gameId: string, q: DbOrTx = db): Promise<GameState> {
-  const game = await getGame(gameId, q);
+  let game = await getGame(gameId, q);
   const idle = isIdle(game);
-  if (q === db && game.status === "active" && !game.joinCode && !idle) game.joinCode = await assignJoinCode(game.id);
-  // Independent reads run concurrently (on a pooled connection each; queued inside a transaction).
-  const [[hostRow], chatRows, plist, agg, blist, snaps] = await Promise.all([
-    q.select().from(users).where(eq(users.id, game.hostUserId)).limit(1),
-    game.chatId ? q.select().from(chats).where(eq(chats.id, game.chatId)).limit(1) : Promise.resolve([]),
-    q.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id)),
-    playerAggregates([gameId], q),
-    q
-      .select({ id: buyins.id, playerId: buyins.playerId, chips: buyins.chips, kind: buyins.kind, createdAt: buyins.createdAt })
-      .from(buyins)
-      .where(eq(buyins.gameId, gameId))
-      .orderBy(asc(buyins.createdAt), asc(buyins.id)),
-    q
-      .select({ playerId: stackSnapshots.playerId, chips: stackSnapshots.chips, recordedAt: stackSnapshots.recordedAt })
-      .from(stackSnapshots)
-      .where(eq(stackSnapshots.gameId, gameId))
-      .orderBy(asc(stackSnapshots.id)),
-  ]);
+  if (q === db && game.status === "active" && !game.joinCode && !idle) {
+    await assignJoinCode(game.id);
+    // Re-read: the code (and the version it bumped) may come from a concurrent request.
+    game = await getGame(gameId, q);
+  }
+  // Independent reads run concurrently on the pool, sequentially inside a transaction.
+  const [[hostRow], chatRows, plist, agg, blist, snaps] = await readAll(
+    q,
+    () => q.select().from(users).where(eq(users.id, game.hostUserId)).limit(1),
+    () => (game.chatId ? q.select().from(chats).where(eq(chats.id, game.chatId)).limit(1) : Promise.resolve([])),
+    () => q.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id)),
+    () => playerAggregates([gameId], q),
+    () =>
+      q
+        .select({ id: buyins.id, playerId: buyins.playerId, chips: buyins.chips, kind: buyins.kind, createdAt: buyins.createdAt })
+        .from(buyins)
+        .where(eq(buyins.gameId, gameId))
+        .orderBy(asc(buyins.createdAt), asc(buyins.id)),
+    () =>
+      q
+        .select({ playerId: stackSnapshots.playerId, chips: stackSnapshots.chips, recordedAt: stackSnapshots.recordedAt })
+        .from(stackSnapshots)
+        .where(eq(stackSnapshots.gameId, gameId))
+        .orderBy(asc(stackSnapshots.id)),
+  );
   const chatRow = chatRows[0];
   const pviews = plist.map((p) => toPlayerView(p, agg));
 
@@ -403,7 +445,7 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
   const template = input.blindTemplate ?? (input.type === "cash" ? "cash" : "regular");
   const structure = input.blindStructure?.length ? input.blindStructure : buildStructure(template, input.startingStack);
   const lang = await langOfUser(actor.id);
-  const date = new Date().toLocaleDateString(localeOf(lang), { day: "numeric", month: "short" });
+  const date = new Date().toLocaleDateString(localeOf(lang), { day: "numeric", month: "short", timeZone: "Europe/Kyiv" });
   const game = await db.transaction(async (tx) => {
     const [g] = await tx
       .insert(games)
@@ -430,9 +472,10 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
     return g;
   });
 
-  game.joinCode = await assignJoinCode(game.id);
-  if (game.reminderIntervalMin && game.chatId) await scheduleReminder(game);
-  return game;
+  await assignJoinCode(game.id);
+  const created = await getGame(game.id);
+  if (created.reminderIntervalMin && created.chatId) await scheduleReminder(created);
+  return created;
 }
 
 export interface UpdateGameInput {
@@ -558,6 +601,7 @@ export async function updatePlayer(
       if (input.status === "active") Object.assign(patch, { finishPlace: null, bustedAt: null });
     }
     if (Object.keys(patch).length) await tx.update(players).set(patch).where(eq(players.id, playerId));
+    if (patch.status === "active") await releaseSeatIfTaken(tx, gameId, playerId);
   });
 }
 
@@ -569,17 +613,40 @@ export async function removePlayer(gameId: string, playerId: number, actor: User
   });
 }
 
+/**
+ * A player coming back into play (rebuy, un-bust, status → active) gives up their old seat if another
+ * active player sits there now: reconciliation then seats them like a newcomer instead of evicting
+ * the player who took the seat.
+ */
+async function releaseSeatIfTaken(tx: Tx, gameId: string, playerId: number) {
+  await tx.execute(sql`
+    update players p set table_no = null, seat_no = null
+    where p.id = ${playerId} and p.game_id = ${gameId} and p.table_no is not null and exists (
+      select 1 from players o
+      where o.game_id = p.game_id and o.id <> p.id and o.status = 'active'
+        and o.table_no = p.table_no and o.seat_no = p.seat_no
+    )`);
+}
+
 // ---------------------------------------------------------------- stacks & buy-ins
+
+/** Chip amounts are stored as int4: caps keep every stored value (and stack sums) far from 2^31. */
+export const MAX_CHIPS = 1_000_000_000;
+/** Total buy-in chips of one player in one game. */
+export const MAX_BUYIN_TOTAL = 1_000_000_000;
+/** A stack after a buy-in: at most a set stack plus all buy-ins. */
+const MAX_STACK = MAX_CHIPS + MAX_BUYIN_TOTAL;
 
 export async function setStack(gameId: string, playerId: number, actor: User, chips: number) {
   await mutateGame(gameId, async ({ tx, game }) => {
     assertActive(game);
     const player = await getPlayer(tx, gameId, playerId);
     assertCanEditPlayer(game, player, actor);
-    if (!Number.isInteger(chips) || chips < 0) throw badRequest("errors.stackInvalid");
+    if (!Number.isInteger(chips) || chips < 0 || chips > MAX_CHIPS) throw badRequest("errors.stackInvalid");
     await tx.insert(stackSnapshots).values({ gameId, playerId, chips, recordedBy: actor.id });
     if (player.status === "busted" && chips > 0 && game.type === "cash") {
       await tx.update(players).set({ status: "active" }).where(eq(players.id, playerId));
+      await releaseSeatIfTaken(tx, gameId, playerId);
     }
   });
 }
@@ -590,13 +657,20 @@ export async function addBuyin(gameId: string, playerId: number, actor: User, ki
     const player = await getPlayer(tx, gameId, playerId);
     assertCanEditPlayer(game, player, actor);
     const amount = chips ?? game.startingStack;
-    if (!Number.isInteger(amount) || amount <= 0) throw badRequest("errors.buyinInvalid");
+    if (!Number.isInteger(amount) || amount <= 0 || amount > MAX_BUYIN_TOTAL) throw badRequest("errors.buyinInvalid");
+    const [{ total }] = await tx
+      .select({ total: sql<number>`coalesce(sum(${buyins.chips}), 0)::bigint`.mapWith(Number) })
+      .from(buyins)
+      .where(eq(buyins.playerId, playerId));
+    if (total + amount > MAX_BUYIN_TOTAL) throw badRequest("errors.buyinInvalid");
     const stack = (await currentStack(tx, playerId)) + amount;
+    if (stack > MAX_STACK) throw badRequest("errors.buyinInvalid");
     await tx.insert(buyins).values({ gameId, playerId, chips: amount, kind, createdBy: actor.id });
     await tx.insert(stackSnapshots).values({ gameId, playerId, chips: stack, recordedBy: actor.id });
     if (player.status !== "active") {
       // A rebuy brings a busted tournament player back in; their place is recalculated later.
       await tx.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
+      await releaseSeatIfTaken(tx, gameId, playerId);
     }
     return { stack };
   });
@@ -613,7 +687,7 @@ export async function deleteBuyin(gameId: string, buyinId: number, actor: User) 
       .limit(1);
     if (!b) throw notFound("errors.buyinNotFound");
     const [{ count }] = await tx
-      .select({ count: sql<number>`count(*)::int` })
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(buyins)
       .where(eq(buyins.playerId, b.playerId));
     if (Number(count) <= 1) throw badRequest("errors.onlyBuyin");
@@ -634,7 +708,7 @@ export async function bustPlayer(gameId: string, playerId: number, actor: User) 
     if (player.status !== "active") throw badRequest("errors.alreadyBusted");
     // Counted under the game lock, so two simultaneous eliminations get different places.
     const [{ count }] = await tx
-      .select({ count: sql<number>`count(*)::int` })
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(players)
       .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
     const place = game.type === "tournament" ? bustPlace(Number(count)) : null;
@@ -662,8 +736,9 @@ export async function unbustPlayer(gameId: string, playerId: number, actor: User
   await mutateGame(gameId, async ({ tx, game }) => {
     assertHost(game, actor);
     assertActive(game);
-    await getPlayer(tx, gameId, playerId);
+    const player = await getPlayer(tx, gameId, playerId);
     await tx.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
+    if (player.status !== "active") await releaseSeatIfTaken(tx, gameId, playerId);
   });
 }
 
@@ -687,6 +762,15 @@ function seatLine(lang: Lang, name: string, m: SeatMove) {
     : translate(lang, "msg.seatNew", { name: escapeHtml(name), to });
 }
 
+/** Field-by-field comparison (jsonb does not keep key order, so JSON strings never match). */
+function sameSeatingState(a: SeatingState, b: SeatingState) {
+  return (
+    a.seatsPerTable === b.seatsPerTable &&
+    a.tables.length === b.tables.length &&
+    a.tables.every((t, i) => t.no === b.tables[i].no && (t.button ?? null) === (b.tables[i].button ?? null))
+  );
+}
+
 /**
  * Keeps an active game's seating consistent after any change (joins, eliminations, rebuys):
  * seats newcomers, breaks and balances tables. Returns a group message describing the moves.
@@ -700,16 +784,18 @@ async function reconcileGameSeating(tx: Tx, gameId: string) {
   const plist = await tx
     .select({ id: players.id, name: players.displayName, status: players.status, tableNo: players.tableNo, seatNo: players.seatNo })
     .from(players)
-    .where(eq(players.gameId, gameId));
+    .where(eq(players.gameId, gameId))
+    .orderBy(asc(players.id));
   const r = reconcileSeating(
     g.tables,
     plist.map((p) => ({ id: p.id, active: p.status === "active", tableNo: p.tableNo, seatNo: p.seatNo })),
   );
-  if (!r.moves.length && JSON.stringify(r.state) === JSON.stringify(g.tables)) return null;
+  if (!r.moves.length && sameSeatingState(r.state, g.tables)) return null;
   await writeSeats(tx, gameId, r.moves.map((m) => ({ playerId: m.playerId, ...m.to })));
   await tx.update(games).set({ tables: r.state }).where(eq(games.id, gameId));
   const names = new Map(plist.map((p) => [p.id, p.name]));
-  const moved = r.moves.filter((m) => m.from && m.from.tableNo !== m.to.tableNo);
+  // Any seat change of a seated player is announced, also within the same table.
+  const moved = r.moves.filter((m) => m.from);
   const seated = r.moves.filter((m) => !m.from);
   const lines = [...moved, ...seated].map((m) => ({ name: names.get(m.playerId) ?? "?", move: m }));
   return { chatId: g.chatId, lines };
@@ -900,7 +986,7 @@ export async function endGame(gameId: string, actor: User, finalStacks?: Record<
     const state = await loadGameState(gameId, tx);
     const finals = state.players.map((p) => {
       const raw = finalStacks?.[String(p.id)];
-      const chips = raw != null && Number.isInteger(raw) && raw >= 0 ? raw : p.currentChips;
+      const chips = raw != null && Number.isInteger(raw) && raw >= 0 && raw <= MAX_STACK ? raw : p.currentChips;
       return { p, chips };
     });
     const changed = finals.filter((f) => f.chips !== f.p.currentChips);

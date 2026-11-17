@@ -1,8 +1,10 @@
+import { createHmac, randomBytes } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chatMembers, chats, games, players, seasons, type Chat, type Season } from "@/lib/db/schema";
 import { computeLeaderboard, computeResults, type LeaderboardGame, type LeaderboardRow } from "@/lib/game/results";
 import { tgApi } from "@/lib/telegram/api";
+import { config } from "@/lib/config";
 import { badRequest, forbidden, notFound } from "./errors";
 import { playerAggregates, toPlayerView } from "./games";
 
@@ -101,15 +103,16 @@ export async function isChatMember(chatId: number, userId: number) {
 }
 
 /**
- * Seasons reset the group's leaderboard, so only people running games may manage them:
- * someone who hosted a game in this group, or a Telegram admin of the group.
+ * Seasons reset the group's leaderboard, so only people running games may manage them: someone who
+ * hosted a finished game in this group (any member can create a game, so an empty or deleted one
+ * doesn't count), or a Telegram admin of the group.
  */
 export async function canManageSeasons(chatId: number, userId: number): Promise<boolean> {
   if (!(await isChatMember(chatId, userId))) return false;
   const [hosted] = await db
     .select({ id: games.id })
     .from(games)
-    .where(and(eq(games.chatId, chatId), eq(games.hostUserId, userId)))
+    .where(and(eq(games.chatId, chatId), eq(games.hostUserId, userId), eq(games.status, "finished")))
     .limit(1);
   if (hosted) return true;
   const api = tgApi();
@@ -150,4 +153,18 @@ export async function endSeason(chatId: number, userId: number) {
     .where(and(eq(seasons.chatId, chatId), eq(seasons.isActive, true)))
     .returning();
   return s ?? null;
+}
+
+/** Fallback HMAC key when no session secret is configured (stable for this server instance only). */
+const instanceSecret = randomBytes(32).toString("hex");
+
+/** Opaque, stable replacement for a leaderboard row key (`u:<telegram id>` / `n:<name>`). */
+function opaqueKey(key: string) {
+  return `x:${createHmac("sha256", config.sessionSecret || instanceSecret).update(`lb:${key}`).digest("base64url").slice(0, 16)}`;
+}
+
+/** The leaderboard as seen by someone outside the group: no Telegram ids. */
+export function redactLeaderboard(data: LeaderboardData): LeaderboardData {
+  const redact = (rows: LeaderboardRow[]) => rows.map((r) => ({ ...r, userId: null, key: opaqueKey(r.key) }));
+  return { ...data, tournament: redact(data.tournament), cash: redact(data.cash) };
 }

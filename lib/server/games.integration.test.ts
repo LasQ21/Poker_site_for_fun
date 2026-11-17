@@ -11,8 +11,8 @@ const d = url ? describe : describe.skip;
 
 d("game service (integration)", () => {
   let G: typeof import("./games");
-  let host: User, anna: User, ivan: User, guest: User;
-  const IDS = [7101, 7102, 7103, 7104];
+  let host: User, anna: User, ivan: User, guest: User, burst: User;
+  const IDS = [7101, 7102, 7103, 7104, 7105];
 
   beforeAll(async () => {
     process.env.DATABASE_URL = url;
@@ -24,8 +24,8 @@ d("game service (integration)", () => {
     await db.delete(joinAttempts).where(inArray(joinAttempts.userId, IDS));
     await db.delete(users).where(inArray(users.id, IDS));
     const { upsertUser } = await import("./users");
-    [host, anna, ivan, guest] = await Promise.all(
-      ["Хост", "Анна", "Іван", "Гість"].map((first_name, i) => upsertUser({ id: IDS[i], first_name })),
+    [host, anna, ivan, guest, burst] = await Promise.all(
+      ["Хост", "Анна", "Іван", "Гість", "Бурст"].map((first_name, i) => upsertUser({ id: IDS[i], first_name })),
     );
     G = await import("./games");
   });
@@ -139,6 +139,55 @@ d("game service (integration)", () => {
     expect(await G.joinByCode(anna, code)).toMatchObject({ gameId: game.id, status: "joined" });
   });
 
+  it("rate-limits a burst of parallel wrong join codes", async () => {
+    const { game } = await tournament([]);
+    const code = (await G.getGame(game.id)).joinCode!;
+    const wrong = code === "1000" ? "1001" : "1000";
+    const { db } = await import("@/lib/db");
+    const { games } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.update(games).set({ joinCode: null }).where(eq(games.joinCode, wrong));
+    const results = await Promise.allSettled(Array.from({ length: 30 }, () => G.joinByCode(burst, wrong)));
+    const statuses = results.map((r) => (r.status === "rejected" ? (r.reason as { status?: number }).status : 200));
+    expect(statuses.filter((x) => x === 404)).toHaveLength(G.JOIN_MAX_FAILS);
+    expect(statuses.filter((x) => x === 429)).toHaveLength(30 - G.JOIN_MAX_FAILS);
+  });
+
+  it("assigns one join code to concurrent loads and bumps the version", async () => {
+    const { game } = await tournament([]);
+    const { db } = await import("@/lib/db");
+    const { games } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.update(games).set({ joinCode: null }).where(eq(games.id, game.id));
+    const v0 = (await G.getGame(game.id)).version;
+    const states = await Promise.all([1, 2, 3].map(() => G.loadGameState(game.id)));
+    const codes = states.map((s) => s.game.joinCode);
+    expect(codes[0]).toMatch(/^\d{4}$/);
+    expect(new Set(codes).size).toBe(1);
+    const g = await G.getGame(game.id);
+    expect(g.joinCode).toBe(codes[0]);
+    expect(g.version).toBe(v0 + 1);
+    for (const s of states) expect(s.game.version).toBe(v0 + 1);
+  });
+
+  it("caps buy-in totals so chip sums cannot overflow", async () => {
+    const { game, pid } = await tournament();
+    await G.addBuyin(game.id, pid(anna), anna, "rebuy", G.MAX_BUYIN_TOTAL - 1000);
+    await expect(G.addBuyin(game.id, pid(anna), anna, "rebuy", 1)).rejects.toMatchObject({ status: 400 });
+    await expect(G.addBuyin(game.id, pid(ivan), ivan, "rebuy", G.MAX_BUYIN_TOTAL)).rejects.toMatchObject({ status: 400 });
+    await expect(G.setStack(game.id, pid(ivan), ivan, G.MAX_CHIPS + 1)).rejects.toMatchObject({ status: 400 });
+    const s = await G.loadGameState(game.id);
+    expect(s.players.find((p) => p.id === pid(anna))?.buyinChips).toBe(G.MAX_BUYIN_TOTAL);
+    // Totals of several games together go past 2^31 without breaking the aggregate query.
+    const other = await tournament();
+    await G.addBuyin(other.game.id, other.pid(anna), anna, "rebuy", G.MAX_BUYIN_TOTAL - 1000);
+    await G.addBuyin(other.game.id, other.pid(ivan), ivan, "rebuy", G.MAX_BUYIN_TOTAL - 1000);
+    await G.addBuyin(other.game.id, other.pid(host), host, "rebuy", G.MAX_BUYIN_TOTAL - 1000);
+    const agg = await G.playerAggregates([game.id, other.game.id]);
+    const sum = [...agg.totals.values()].reduce((a, t) => a + t.chips, 0);
+    expect(sum).toBeGreaterThan(2 ** 31);
+  });
+
   it("releases join codes of games idle for a day", async () => {
     const { game } = await tournament([]);
     const { db } = await import("@/lib/db");
@@ -216,6 +265,41 @@ d("game service (integration)", () => {
     expect(s.players.every((p) => p.tableNo == null)).toBe(true);
   });
 
+  it("keeps a late joiner in the seat of a busted player who rebuys", async () => {
+    const game = await G.createGame(host, { type: "tournament", startingStack: 1000, hostPlays: false, playerNames: ["A", "B", "C", "D"] });
+    await G.seatRandom(game.id, host, 4);
+    let s = await G.loadGameState(game.id);
+    const a = s.players.find((p) => p.displayName === "A")!;
+    await G.bustPlayer(game.id, a.id, host);
+    // The only free seat is A's: the late joiner takes it.
+    await G.joinGame(game.id, ivan);
+    s = await G.loadGameState(game.id);
+    const iv = s.players.find((p) => p.userId === ivan.id)!;
+    expect([iv.tableNo, iv.seatNo]).toEqual([a.tableNo, a.seatNo]);
+    // Put the button on Ivan's seat, so table balancing after the rebuy moves someone else.
+    const { db } = await import("@/lib/db");
+    const { games } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const tables = s.game.tables!;
+    await db
+      .update(games)
+      .set({ tables: { ...tables, tables: tables.tables.map((t) => (t.no === iv.tableNo ? { ...t, button: iv.seatNo } : t)) } })
+      .where(eq(games.id, game.id));
+    for (let i = 0; i < 5; i++) {
+      // Repeat to rule out luck: bust and rebuy A several times.
+      await G.addBuyin(game.id, a.id, host, "rebuy");
+      s = await G.loadGameState(game.id);
+      const ivNow = s.players.find((p) => p.userId === ivan.id)!;
+      expect([ivNow.tableNo, ivNow.seatNo]).toEqual([iv.tableNo, iv.seatNo]);
+      const aNow = s.players.find((p) => p.id === a.id)!;
+      expect(aNow.status).toBe("active");
+      expect(aNow.tableNo).not.toBeNull();
+      const keys = s.players.filter((p) => p.status === "active").map((p) => `${p.tableNo}:${p.seatNo}`);
+      expect(new Set(keys).size).toBe(keys.length);
+      await G.bustPlayer(game.id, a.id, host);
+    }
+  });
+
   it("builds a player's profile stats from finished games", async () => {
     const { loadPlayerStats } = await import("./stats");
     const before = await loadPlayerStats(ivan.id);
@@ -254,7 +338,13 @@ d("game service (integration)", () => {
     for (const u of [host, anna, guest]) await U.touchMember(CHAT, u.id);
     // Nobody has hosted a game here yet and there is no bot token to ask Telegram about admins.
     await expect(L.startSeason(CHAT, anna.id, "Осінь")).rejects.toMatchObject({ status: 403 });
-    await G.createGame(host, { type: "cash", startingStack: 100, chatId: CHAT });
+    // Any member can create a game, so an unfinished (or deleted) one does not count.
+    const own = await G.createGame(anna, { type: "cash", startingStack: 100, chatId: CHAT });
+    await expect(L.startSeason(CHAT, anna.id, "Осінь")).rejects.toMatchObject({ status: 403 });
+    await G.deleteGame(own.id, anna);
+    const hosted = await G.createGame(host, { type: "cash", startingStack: 100, chatId: CHAT });
+    await expect(L.startSeason(CHAT, host.id, "Осінь")).rejects.toMatchObject({ status: 403 });
+    await G.endGame(hosted.id, host);
     const s = await L.startSeason(CHAT, host.id, "Осінь");
     expect(s.isActive).toBe(true);
     await expect(L.endSeason(CHAT, guest.id)).rejects.toMatchObject({ status: 403 });

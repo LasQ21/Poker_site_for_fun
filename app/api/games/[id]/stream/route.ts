@@ -38,7 +38,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       const unwatch = watchGame(id, (v) => {
         send(`event: update\ndata: ${JSON.stringify(v)}\n\n`);
         if (!v) close();
-      });
+      }, first);
       const ping = setInterval(() => send(`: ping\n\n`), PING_MS);
       const end = setTimeout(close, LIFETIME_MS);
       cleanup = () => {

@@ -2,7 +2,7 @@ import { requireViewer } from "@/lib/server/viewer";
 import { json, route } from "@/lib/server/http";
 import { actionSchema } from "@/lib/server/schemas";
 import * as G from "@/lib/server/games";
-import { escapeHtml, notifyChat, sendCsv, urlButton } from "@/lib/telegram/api";
+import { notifyChat, sendCsv, urlButton } from "@/lib/telegram/api";
 import { ensureBotUsername, gameWebUrl } from "@/lib/config";
 import { translate } from "@/lib/i18n";
 import { langOfUser } from "@/lib/server/users";
@@ -57,7 +57,8 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
           state.game.chatId,
           `${state.game.name.replace(/[^\p{L}\p{N}_-]+/gu, "_")}.csv`,
           G.gameCsv(state, { lang }),
-          escapeHtml(state.game.name),
+          // Sent without parse_mode: plain text, no HTML escaping.
+          state.game.name,
         );
       }
       break;

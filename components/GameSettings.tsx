@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { BLIND_TEMPLATES, buildStructure, type BlindLevel, type BlindTemplateId } from "@/lib/game/blinds";
 import { api } from "@/lib/client/api";
-import { haptic } from "@/lib/client/telegram";
+import { haptic, useClosingConfirmation, useMainButton } from "@/lib/client/telegram";
 import type { GameStateDTO } from "@/lib/types";
 import { Button, inputCls, Sheet } from "./ui";
 
@@ -28,13 +28,22 @@ export function GameSettings({
   const [levels, setLevels] = useState<BlindLevel[]>(game.blindStructure);
   const [busy, setBusy] = useState(false);
 
+  // Reset when the sheet opens — not on every live update, which would wipe unsaved edits.
   useEffect(() => {
     if (open) {
       setName(game.name);
       setReminder(game.reminderIntervalMin ?? 0);
       setLevels(game.blindStructure);
     }
-  }, [open, game]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const dirty =
+    open &&
+    (name !== game.name ||
+      (game.chatId != null && reminder !== (game.reminderIntervalMin ?? 0)) ||
+      JSON.stringify(levels) !== JSON.stringify(game.blindStructure));
+  useClosingConfirmation(dirty);
 
   const update = (i: number, patch: Partial<BlindLevel>) => setLevels((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
@@ -55,6 +64,8 @@ export function GameSettings({
       setBusy(false);
     }
   }
+
+  const nativeSave = useMainButton(open ? { text: "Зберегти", loading: busy, disabled: !dirty, onClick: () => void save() } : null);
 
   return (
     <Sheet open={open} onClose={onClose} title="Налаштування гри">
@@ -141,9 +152,11 @@ export function GameSettings({
         </Button>
       </div>
 
-      <Button size="lg" className="mb-2 w-full" onClick={save} loading={busy}>
-        Зберегти
-      </Button>
+      {!nativeSave && (
+        <Button size="lg" className="mb-2 w-full" onClick={save} loading={busy} disabled={!dirty}>
+          Зберегти
+        </Button>
+      )}
     </Sheet>
   );
 }

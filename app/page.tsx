@@ -8,7 +8,7 @@ import type { GameListItemDTO } from "@/lib/types";
 import { useMe } from "@/components/AppShell";
 import { ChipStack } from "@/components/ChipStack";
 import { GameList } from "@/components/GameList";
-import { IconChevron, IconPlus } from "@/components/icons";
+import { IconChevron, IconPlus, IconSettings } from "@/components/icons";
 import { JoinByCode } from "@/components/JoinByCode";
 import { LoginPanel } from "@/components/LoginPanel";
 import { Empty, LinkButton, PageLoader, Section } from "@/components/ui";
@@ -89,6 +89,9 @@ export default function HomePage() {
           )}
         </>
       )}
+      <Link href="/settings" className="mx-auto mt-2 flex w-fit items-center gap-2 rounded-full px-4 py-2 text-sm font-bold text-hint">
+        <IconSettings width={18} height={18} /> Налаштування
+      </Link>
     </div>
   );
 }

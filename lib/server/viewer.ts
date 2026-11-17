@@ -2,7 +2,7 @@ import { cookies, headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users, type User } from "@/lib/db/schema";
-import { validateInitData, verifySession } from "@/lib/auth/telegram";
+import { signSession, validateInitData, verifySession } from "@/lib/auth/telegram";
 import { config } from "@/lib/config";
 import { upsertUser } from "./users";
 import { unauthorized } from "./errors";
@@ -41,6 +41,20 @@ export function forgetViewer(userId: number) {
   for (const [k, v] of cache) if (v.user.id === userId) cache.delete(k);
 }
 
+export const SESSION_TTL_SEC = 30 * 24 * 3600;
+
+/** Options of the session cookie; `embedded` cookies also work inside Telegram Web's iframe. */
+export function sessionCookieOptions(embedded = false) {
+  const prod = process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    secure: prod,
+    sameSite: embedded && prod ? ("none" as const) : ("lax" as const),
+    path: "/",
+    maxAge: SESSION_TTL_SEC,
+  };
+}
+
 /**
  * Resolves the current user: Mini App initData (`Authorization: tma <initData>`) first,
  * then the website session cookie. Returns null for anonymous (read-only) visitors.
@@ -48,10 +62,21 @@ export function forgetViewer(userId: number) {
 export async function getViewer(): Promise<User | null> {
   const h = await headers();
   const auth = h.get("authorization");
+  const jar = await cookies();
+  const sessionUid = verifySession(jar.get(SESSION_COOKIE)?.value, config.sessionSecret);
   if (auth?.startsWith("tma ")) {
     const raw = auth.slice(4);
     const data = validateInitData(raw, config.botToken);
     if (data) {
+      // initData expires after 24h while a Mini App can stay open for days: a session cookie,
+      // issued on the first valid request, keeps the user signed in after initData goes stale.
+      if (sessionUid !== data.user.id) {
+        try {
+          jar.set(SESSION_COOKIE, signSession(data.user.id, config.sessionSecret), sessionCookieOptions(true));
+        } catch {
+          /* not in a route handler */
+        }
+      }
       const key = `tma:${data.user.id}:${new URLSearchParams(raw).get("hash")}`;
       const hit = cached(key);
       if (hit) return hit;
@@ -60,8 +85,7 @@ export async function getViewer(): Promise<User | null> {
       return user;
     }
   }
-  const jar = await cookies();
-  const uid = verifySession(jar.get(SESSION_COOKIE)?.value, config.sessionSecret);
+  const uid = sessionUid;
   if (uid != null) {
     const key = `uid:${uid}`;
     const hit = cached(key);

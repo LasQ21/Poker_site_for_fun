@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
 import { json, route } from "@/lib/server/http";
 import { AppError } from "@/lib/server/errors";
 import { upsertUser } from "@/lib/server/users";
-import { SESSION_COOKIE } from "@/lib/server/viewer";
+import { SESSION_COOKIE, sessionCookieOptions } from "@/lib/server/viewer";
 
 /** Telegram Login Widget callback (website). */
 export const POST = route(async (req: Request) => {
@@ -12,12 +12,6 @@ export const POST = route(async (req: Request) => {
   const tgUser = validateLoginWidget(data, config.botToken);
   if (!tgUser) throw new AppError(401, "Не вдалося перевірити вхід через Telegram");
   const user = await upsertUser(tgUser);
-  (await cookies()).set(SESSION_COOKIE, signSession(user.id, config.sessionSecret), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 30 * 24 * 3600,
-  });
+  (await cookies()).set(SESSION_COOKIE, signSession(user.id, config.sessionSecret), sessionCookieOptions());
   return json({ user });
 });

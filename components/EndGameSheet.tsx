@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fmtChips, fmtSigned } from "@/lib/format";
+import { useClosingConfirmation, useMainButton } from "@/lib/client/telegram";
 import type { GameStateDTO } from "@/lib/types";
 import { Button, inputCls, Sheet, Signed } from "./ui";
 
@@ -20,12 +21,27 @@ export function EndGameSheet({
   const [busy, setBusy] = useState(false);
   const { game } = state;
 
+  // Prefill when opened; later live updates must not overwrite what the host typed.
   useEffect(() => {
     if (open) setStacks(Object.fromEntries(state.players.map((p) => [String(p.id), String(p.currentChips)])));
-  }, [open, state.players]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const total = Object.values(stacks).reduce((s, v) => s + (Number(v) || 0), 0);
   const diff = total - state.check.totalBuyins;
+  const dirty = open && state.players.some((p) => stacks[String(p.id)] != null && Number(stacks[String(p.id)]) !== p.currentChips);
+
+  async function confirm() {
+    setBusy(true);
+    try {
+      await onConfirm(Object.fromEntries(Object.entries(stacks).map(([k, v]) => [k, Number(v) || 0])));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useClosingConfirmation(dirty);
+  const nativeButton = useMainButton(open ? { text: "🏁 Завершити гру", loading: busy, onClick: () => void confirm() } : null);
 
   return (
     <Sheet open={open} onClose={onClose} title="Завершити гру">
@@ -72,21 +88,11 @@ export function EndGameSheet({
           </div>
         </>
       )}
-      <Button
-        size="lg"
-        className="mb-2 w-full"
-        loading={busy}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await onConfirm(Object.fromEntries(Object.entries(stacks).map(([k, v]) => [k, Number(v) || 0])));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        🏁 Завершити й показати підсумок
-      </Button>
+      {!nativeButton && (
+        <Button size="lg" className="mb-2 w-full" loading={busy} onClick={confirm}>
+          🏁 Завершити й показати підсумок
+        </Button>
+      )}
     </Sheet>
   );
 }

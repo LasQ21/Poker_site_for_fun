@@ -2,10 +2,10 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useCallback } from "react";
+import { useParams } from "next/navigation";
 import { useGame } from "@/lib/client/useGame";
 import { openExternal, useBackButton } from "@/lib/client/telegram";
+import { useAppBack } from "@/lib/client/nav";
 import { fmtBuyins, fmtChips, fmtDateTime, fmtSigned } from "@/lib/format";
 import { playerColor } from "@/components/StackTable";
 import { Badge, Button, Empty, PageLoader, Section, Signed } from "@/components/ui";
@@ -15,9 +15,8 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 
 export default function SummaryPage() {
   const { gameId } = useParams<{ gameId: string }>();
-  const router = useRouter();
   const { data: state, error, isLoading } = useGame(gameId);
-  const back = useCallback(() => router.push(`/g/${gameId}`), [router, gameId]);
+  const back = useAppBack(`/g/${gameId}`);
   useBackButton(back);
 
   if (isLoading) return <PageLoader />;

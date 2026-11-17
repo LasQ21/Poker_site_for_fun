@@ -5,10 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/client/api";
-import { getWebApp } from "@/lib/client/telegram";
+import { closeMiniApp, getWebApp } from "@/lib/client/telegram";
+import { recordNavigation } from "@/lib/client/nav";
+import { loadSettings } from "@/lib/client/settings";
 import type { MeDTO } from "@/lib/types";
-import { IconCards, IconHistory, IconTrophy } from "./icons";
-import { Toast } from "./ui";
+import { IconCards, IconHistory, IconSettings, IconTrophy } from "./icons";
+import { Button, Toast } from "./ui";
 
 const ToastCtx = createContext<(msg: string) => void>(() => {});
 export const useToast = () => useContext(ToastCtx);
@@ -29,6 +31,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<string | null>(null);
   const [miniApp, setMiniApp] = useState(false);
   const clearToast = useCallback(() => setToast(null), []);
+  const { data: me } = useMe();
+
+  useEffect(() => {
+    recordNavigation(pathname);
+  }, [pathname]);
+
+  useEffect(() => {
+    void loadSettings();
+  }, []);
 
   useEffect(() => {
     // Real refraction only where backdrop-filter:url() works (Chromium, not iOS WebKit).
@@ -68,6 +79,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [router]);
 
   const showTabs = TABS.some((t) => t.match(pathname));
+  // In the Mini App the user always comes with initData; no user means it expired (and no session
+  // cookie could rescue it). The website login widget doesn't work there, so ask to relaunch.
+  const sessionExpired = miniApp && me != null && me.user == null;
 
   return (
     <ToastCtx.Provider value={setToast}>
@@ -76,7 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={`mx-auto w-full max-w-xl px-3 ${showTabs ? "pb-32" : "pb-12"}`}
         style={{ paddingTop: miniApp ? "calc(var(--safe-top) + 12px)" : 12 }}
       >
-        {children}
+        {sessionExpired ? <SessionExpired /> : children}
       </main>
       {showTabs && (
         <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4" style={{ paddingBottom: "max(14px, var(--safe-bottom))" }}>
@@ -105,6 +119,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+function SessionExpired() {
+  return (
+    <div className="glass mt-10 rounded-[34px] px-6 py-10 text-center">
+      <div className="mb-3 text-5xl">⏳</div>
+      <h1 className="font-display text-xl font-bold">Сесія застаріла</h1>
+      <p className="mx-auto mt-2 max-w-xs text-[15px] text-hint">
+        Telegram не підтвердив вхід — так буває, якщо застосунок довго був відкритий. Закрийте його й відкрийте знову з чату з ботом.
+      </p>
+      <Button size="lg" className="mt-6 w-full" onClick={closeMiniApp}>
+        Перезапустити
+      </Button>
+    </div>
+  );
+}
+
 function SiteHeader() {
   const { data } = useMe();
   return (
@@ -116,15 +145,20 @@ function SiteHeader() {
           </span>
           <span className="font-display text-[15px] font-bold">Poker Tracker</span>
         </Link>
-        {data?.user && (
-          <span className="flex items-center gap-2 text-sm font-semibold text-hint">
-            {data.user.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={data.user.photoUrl} alt="" className="h-7 w-7 rounded-full" />
-            ) : null}
-            {data.user.firstName}
-          </span>
-        )}
+        <span className="flex items-center gap-3">
+          {data?.user && (
+            <span className="flex items-center gap-2 text-sm font-semibold text-hint">
+              {data.user.photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={data.user.photoUrl} alt="" className="h-7 w-7 rounded-full" />
+              ) : null}
+              {data.user.firstName}
+            </span>
+          )}
+          <Link href="/settings" aria-label="Налаштування" className="text-hint">
+            <IconSettings width={22} height={22} />
+          </Link>
+        </span>
       </div>
     </header>
   );

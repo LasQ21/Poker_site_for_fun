@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fmtChips, fmtDateTime, fmtSigned } from "@/lib/format";
-import { haptic, confirmDialog } from "@/lib/client/telegram";
+import { confirmDialog, haptic, useClosingConfirmation, useMainButton } from "@/lib/client/telegram";
 import type { GameStateDTO, PlayerDTO } from "@/lib/types";
 import type { GameActionInput } from "@/lib/server/schemas";
 import { canEdit } from "./StackTable";
@@ -33,20 +33,40 @@ export function StackEditor({
   const [name, setName] = useState("");
   const [customBuyin, setCustomBuyin] = useState<string | null>(null);
 
+  // Reset only when another player is opened: live updates of the same player must not wipe input.
+  const playerId = player?.id;
   useEffect(() => {
-    if (player) {
-      setValue(player.currentChips);
-      setFresh(true);
-      setRenaming(false);
-      setName(player.displayName);
-      setCustomBuyin(null);
-    }
-  }, [player]);
+    if (!player) return;
+    setValue(player.currentChips);
+    setFresh(true);
+    setRenaming(false);
+    setName(player.displayName);
+    setCustomBuyin(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerId]);
+  // While nothing was typed, follow the live stack.
+  const liveChips = player?.currentChips;
+  useEffect(() => {
+    if (fresh && liveChips != null) setValue(liveChips);
+  }, [liveChips, fresh]);
+
+  const editable = player != null && canEdit(state, player);
+  const unchanged = player == null || value === player.currentChips;
+  useClosingConfirmation(editable && !fresh && !unchanged);
+  const nativeSave = useMainButton(
+    player && editable
+      ? {
+          text: `Зберегти стек · ${fmtChips(value)}`,
+          disabled: unchanged,
+          loading: busy,
+          onClick: () => void run({ action: "setStack", playerId: player.id, chips: value }, "Стек оновлено"),
+        }
+      : null,
+  );
 
   if (!player) return <Sheet open={false} onClose={onClose}>{null}</Sheet>;
 
   const { game } = state;
-  const editable = canEdit(state, player);
   const host = state.role === "host" && game.status === "active";
   const small = niceStep(game.startingStack / 20);
   const big = niceStep(game.startingStack / 4);
@@ -123,15 +143,17 @@ export function StackEditor({
             ))}
           </div>
 
-          <Button
-            size="lg"
-            className="mb-3 w-full"
-            loading={busy}
-            disabled={value === player.currentChips}
-            onClick={() => run({ action: "setStack", playerId: player.id, chips: value }, "Стек оновлено")}
-          >
-            Зберегти стек
-          </Button>
+          {!nativeSave && (
+            <Button
+              size="lg"
+              className="mb-3 w-full"
+              loading={busy}
+              disabled={unchanged}
+              onClick={() => run({ action: "setStack", playerId: player.id, chips: value }, "Стек оновлено")}
+            >
+              Зберегти стек
+            </Button>
+          )}
 
           <div className="mb-3 grid grid-cols-2 gap-2">
             <Button

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { computeTimer, type TimerView } from "@/lib/game/blinds";
 import type { GameDTO } from "@/lib/types";
 import { haptic } from "./telegram";
+import { getSettings } from "./settings";
 
 /** Live timer view, recomputed several times a second using the server clock offset. */
 export function useTimer(game: GameDTO, clockOffsetMs: number): TimerView {
@@ -43,6 +44,7 @@ export function useTimer(game: GameDTO, clockOffsetMs: number): TimerView {
 let ctx: AudioContext | null = null;
 
 export function beep() {
+  if (!getSettings().sound) return;
   try {
     ctx ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     const now = ctx.currentTime;

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useParams } from "next/navigation";
+import { useState } from "react";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/client/api";
 import { useBackButton } from "@/lib/client/telegram";
+import { useAppBack } from "@/lib/client/nav";
 import { fmtBuyins, fmtDate, fmtSigned } from "@/lib/format";
 import type { LeaderboardDTO } from "@/lib/types";
 import { useToast } from "@/components/AppShell";
@@ -13,14 +14,13 @@ import { Button, Empty, inputCls, PageLoader, Section, Segmented, Sheet, Signed 
 
 export default function LeaderboardPage() {
   const { publicId } = useParams<{ publicId: string }>();
-  const router = useRouter();
   const toast = useToast();
   const [season, setSeason] = useState<string>("current");
   const { data, error, isLoading, mutate } = useSWR<LeaderboardDTO>(`/api/leaderboard/${publicId}?season=${season}`, fetcher);
   const [tab, setTab] = useState<"tournament" | "cash" | null>(null);
   const [seasonSheet, setSeasonSheet] = useState(false);
   const [seasonName, setSeasonName] = useState("");
-  const back = useCallback(() => router.push("/leaderboard"), [router]);
+  const back = useAppBack("/leaderboard");
   useBackButton(back);
 
   if (isLoading && !data) return <PageLoader />;

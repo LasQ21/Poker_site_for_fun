@@ -292,3 +292,32 @@ export function Toast({ message, onDone }: { message: string | null; onDone: () 
     </div>
   );
 }
+
+/** iOS-style switch row. */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: ReactNode;
+  hint?: ReactNode;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-3 border-b hairline px-4 py-3.5 last:border-b-0">
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold">{label}</span>
+        {hint && <span className="mt-0.5 block text-[13px] text-hint">{hint}</span>}
+      </span>
+      <input type="checkbox" role="switch" className="peer sr-only" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span
+        aria-hidden="true"
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-link ${checked ? "bg-pos" : "bg-fg/15"}`}
+      >
+        <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-[left] ${checked ? "left-[22px]" : "left-0.5"}`} />
+      </span>
+    </label>
+  );
+}

@@ -7,7 +7,8 @@ import { useCallback, useMemo, useState } from "react";
 import { computeTimer, type TimerAction } from "@/lib/game/blinds";
 import { api } from "@/lib/client/api";
 import { useGame, useNow } from "@/lib/client/useGame";
-import { confirmDialog, haptic, isMiniApp, openExternal, useBackButton } from "@/lib/client/telegram";
+import { confirmDialog, haptic, isMiniApp, openExternal, useBackButton, useIsMiniApp } from "@/lib/client/telegram";
+import { useAppBack } from "@/lib/client/nav";
 import { fmtChips, fmtSigned } from "@/lib/format";
 import type { GameActionInput } from "@/lib/server/schemas";
 import type { PlayerDTO } from "@/lib/types";
@@ -37,7 +38,8 @@ export default function GamePage() {
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const back = useCallback(() => router.push("/"), [router]);
+  const miniApp = useIsMiniApp();
+  const back = useAppBack("/");
   useBackButton(back);
 
   const run = useCallback(
@@ -173,7 +175,7 @@ export default function GamePage() {
           </div>
         </Section>
       )}
-      {active && !state.viewer && !isMiniApp() && <LoginPanel compact />}
+      {active && !state.viewer && !miniApp && <LoginPanel compact />}
 
       <Section
         title={`Гравці (${state.players.length})`}

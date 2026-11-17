@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/lib/client/api";
-import { haptic, useBackButton } from "@/lib/client/telegram";
+import { haptic, useBackButton, useMainButton } from "@/lib/client/telegram";
+import { useAppBack } from "@/lib/client/nav";
 import { BLIND_TEMPLATES, buildStructure, formatBlinds, type BlindTemplateId } from "@/lib/game/blinds";
 import { fmtChips } from "@/lib/format";
 import { useMe, useToast } from "@/components/AppShell";
@@ -17,7 +18,7 @@ export default function NewGamePage() {
   const router = useRouter();
   const toast = useToast();
   const { data: me, isLoading } = useMe();
-  const back = useCallback(() => router.back(), [router]);
+  const back = useAppBack("/");
   useBackButton(back);
 
   const [type, setType] = useState<"cash" | "tournament">("tournament");
@@ -33,6 +34,10 @@ export default function NewGamePage() {
 
   const effectiveTemplate: BlindTemplateId = type === "cash" ? "cash" : template === "cash" ? "regular" : template;
   const preview = useMemo(() => buildStructure(effectiveTemplate, stack).filter((l) => !l.isBreak).slice(0, 4), [effectiveTemplate, stack]);
+
+  const nativeCreate = useMainButton(
+    me?.user ? { text: type === "cash" ? "Створити кеш-гру" : "Створити турнір", loading: busy, disabled: stack < 1, onClick: () => void submit() } : null,
+  );
 
   if (isLoading) return <PageLoader />;
   if (!me?.user) return <LoginPanel />;
@@ -197,9 +202,11 @@ export default function NewGamePage() {
         <div className="px-4 pb-3 text-[13px] text-hint">Друзі з Telegram зможуть самі «сісти» на своє місце за посиланням або командою /join.</div>
       </Section>
 
-      <Button size="lg" className="w-full" onClick={submit} loading={busy} disabled={stack < 1}>
-        Створити гру
-      </Button>
+      {!nativeCreate && (
+        <Button size="lg" className="w-full" onClick={submit} loading={busy} disabled={stack < 1}>
+          Створити гру
+        </Button>
+      )}
     </div>
   );
 }

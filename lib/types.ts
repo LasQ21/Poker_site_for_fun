@@ -1,4 +1,6 @@
 import type { BlindLevel } from "@/lib/game/blinds";
+import type { SeatingState } from "@/lib/game/seating";
+import type { PlayerStats } from "@/lib/game/stats";
 import type { LeaderboardRow, ResultRow } from "@/lib/game/results";
 
 /** JSON shapes returned by the API (dates are ISO strings). */
@@ -17,6 +19,7 @@ export interface GameDTO {
   pausedRemainingMs: number | null;
   reminderIntervalMin: number | null;
   joinCode: string | null;
+  tables: SeatingState | null;
   /** Bumped by every change; compared with versions pushed by the live stream. */
   version: number;
   createdAt: string;
@@ -30,6 +33,8 @@ export interface PlayerDTO {
   status: "active" | "busted" | "left";
   finishPlace: number | null;
   finalChips: number | null;
+  tableNo: number | null;
+  seatNo: number | null;
   currentChips: number;
   buyinChips: number;
   buyinCount: number;
@@ -85,4 +90,9 @@ export interface LeaderboardDTO {
   recent: { id: string; name: string; type: string; finishedAt: string | null; winner: string | null }[];
   /** The viewer may start/end seasons (game host in this group or group admin). */
   canManageSeasons: boolean;
+}
+
+export interface ProfileDTO {
+  user: { id: number; firstName: string; lastName: string | null; username: string | null; photoUrl: string | null };
+  stats: PlayerStats;
 }

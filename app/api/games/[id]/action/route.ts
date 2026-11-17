@@ -57,6 +57,18 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
     case "reopen":
       await G.reopenGame(id, viewer);
       break;
+    case "seatRandom":
+      await G.seatRandom(id, viewer, a.seatsPerTable);
+      break;
+    case "moveButton":
+      await G.moveDealerButton(id, viewer, a.tableNo);
+      break;
+    case "rebalance":
+      await G.rebalanceTables(id, viewer);
+      break;
+    case "clearSeating":
+      await G.clearSeating(id, viewer);
+      break;
   }
   return json({ ok: true, result });
 });

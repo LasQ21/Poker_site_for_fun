@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { BlindLevel } from "@/lib/game/blinds";
+import type { SeatingState } from "@/lib/game/seating";
 
 const tgId = (name: string) => bigint(name, { mode: "number" });
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
@@ -89,6 +90,8 @@ export const games = pgTable(
     timerVersion: integer("timer_version").notNull().default(0),
     reminderIntervalMin: integer("reminder_interval_min"),
     reminderVersion: integer("reminder_version").notNull().default(0),
+    /** Table seating (null = no seating): seats per table, live tables and their dealer buttons. */
+    tables: jsonb("tables").$type<SeatingState>(),
     /** Bumped by every mutation; drives ETags and the live-update stream. */
     version: integer("version").notNull().default(0),
     /** 4-digit code to join the game; unique among active games, freed when the game ends. */
@@ -119,6 +122,8 @@ export const players = pgTable(
     finishPlace: integer("finish_place"),
     /** Final chip count confirmed when a game ends (the "final_stacks" of the spec). */
     finalChips: integer("final_chips"),
+    tableNo: integer("table_no"),
+    seatNo: integer("seat_no"),
     createdAt: ts("created_at").notNull().defaultNow(),
     bustedAt: ts("busted_at"),
   },

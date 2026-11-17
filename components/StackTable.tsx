@@ -64,7 +64,7 @@ export function StackTable({ state, onSelect, now, bb }: { state: GameStateDTO; 
               <span className="mt-0.5 block text-[12px] font-medium text-hint">
                 {game.type === "tournament" && out
                   ? `вибув · ${r?.place}-е місце`
-                  : `${p.buyinCount} БІ · ${ago(p.lastUpdateAt, now)}`}
+                  : `${game.tables && p.tableNo != null ? `стіл ${p.tableNo}·${p.seatNo} · ` : ""}${p.buyinCount} БІ · ${ago(p.lastUpdateAt, now)}`}
               </span>
               {!out && (
                 <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-fg/8">

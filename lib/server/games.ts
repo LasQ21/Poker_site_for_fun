@@ -26,6 +26,15 @@ import {
   type TimerAction,
 } from "@/lib/game/blinds";
 import { bustPlace, chipCheck, computeResults, type ResultRow } from "@/lib/game/results";
+import {
+  MAX_SEATS,
+  MIN_SEATS,
+  moveButton as moveButtonOn,
+  randomSeating,
+  reconcileSeating,
+  type SeatMove,
+  type SeatingState,
+} from "@/lib/game/seating";
 import { fmtBuyins, fmtChips, fmtSigned } from "@/lib/format";
 import { miniAppLink } from "@/lib/config";
 import { scheduleJob } from "@/lib/qstash";
@@ -330,6 +339,11 @@ async function mutateGame<T>(gameId: string, fn: (m: Mutation) => Promise<T>): P
     const [game] = await tx.select().from(games).where(eq(games.id, gameId)).for("update");
     if (!game) throw notFound("Гру не знайдено");
     const out = await fn({ tx, game, after: (e) => effects.push(e) });
+    const seatMoves = await reconcileGameSeating(tx, gameId);
+    if (seatMoves?.text && seatMoves.chatId) {
+      const { chatId, text } = seatMoves;
+      effects.push(() => notifyChat(chatId, text));
+    }
     await tx
       .update(games)
       .set({ updatedAt: new Date(), version: sql`${games.version} + 1` })
@@ -641,6 +655,134 @@ export async function unbustPlayer(gameId: string, playerId: number, actor: User
     assertActive(game);
     await getPlayer(tx, gameId, playerId);
     await tx.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
+  });
+}
+
+
+// ---------------------------------------------------------------- seating & dealer button
+
+async function writeSeats(q: DbOrTx, gameId: string, moves: { playerId: number; tableNo: number | null; seatNo: number | null }[]) {
+  if (!moves.length) return;
+  const t = sql.join(moves.map((m) => sql`when ${m.playerId} then ${m.tableNo}::int`), sql` `);
+  const s = sql.join(moves.map((m) => sql`when ${m.playerId} then ${m.seatNo}::int`), sql` `);
+  await q
+    .update(players)
+    .set({ tableNo: sql`case ${players.id} ${t} end`, seatNo: sql`case ${players.id} ${s} end` })
+    .where(and(eq(players.gameId, gameId), inArray(players.id, moves.map((m) => m.playerId))));
+}
+
+function seatLine(name: string, m: SeatMove) {
+  const to = `стіл ${m.to.tableNo}, місце ${m.to.seatNo}`;
+  return m.from ? `• ${escapeHtml(name)}: ${to} (був стіл ${m.from.tableNo})` : `• ${escapeHtml(name)} сідає: ${to}`;
+}
+
+/**
+ * Keeps an active game's seating consistent after any change (joins, eliminations, rebuys):
+ * seats newcomers, breaks and balances tables. Returns a group message describing the moves.
+ */
+async function reconcileGameSeating(tx: Tx, gameId: string) {
+  const [g] = await tx
+    .select({ tables: games.tables, status: games.status, chatId: games.chatId })
+    .from(games)
+    .where(eq(games.id, gameId));
+  if (!g?.tables || g.status !== "active") return null;
+  const plist = await tx
+    .select({ id: players.id, name: players.displayName, status: players.status, tableNo: players.tableNo, seatNo: players.seatNo })
+    .from(players)
+    .where(eq(players.gameId, gameId));
+  const r = reconcileSeating(
+    g.tables,
+    plist.map((p) => ({ id: p.id, active: p.status === "active", tableNo: p.tableNo, seatNo: p.seatNo })),
+  );
+  if (!r.moves.length && JSON.stringify(r.state) === JSON.stringify(g.tables)) return null;
+  await writeSeats(tx, gameId, r.moves.map((m) => ({ playerId: m.playerId, ...m.to })));
+  await tx.update(games).set({ tables: r.state }).where(eq(games.id, gameId));
+  const names = new Map(plist.map((p) => [p.id, p.name]));
+  const moved = r.moves.filter((m) => m.from && m.from.tableNo !== m.to.tableNo);
+  const seated = r.moves.filter((m) => !m.from);
+  const lines = [...moved, ...seated].map((m) => seatLine(names.get(m.playerId) ?? "?", m));
+  return { chatId: g.chatId, text: lines.length ? `🔀 <b>Пересадка</b>\n${lines.join("\n")}` : "" };
+}
+
+export function seatingText(state: GameState): string {
+  const t = state.game.tables;
+  if (!t) return "";
+  return t.tables
+    .map((table) => {
+      const seated = state.players
+        .filter((p) => p.status === "active" && p.tableNo === table.no && p.seatNo != null)
+        .sort((a, b) => a.seatNo! - b.seatNo!)
+        .map((p) => `  ${p.seatNo}. ${escapeHtml(p.displayName)}${p.seatNo === table.button ? " 🔘" : ""}`);
+      return `<b>Стіл ${table.no}</b>\n${seated.join("\n")}`;
+    })
+    .join("\n\n");
+}
+
+/** Random seat draw for all active players. */
+export async function seatRandom(gameId: string, actor: User, seatsPerTable: number) {
+  await mutateGame(gameId, async ({ tx, game, after }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    if (seatsPerTable < MIN_SEATS || seatsPerTable > MAX_SEATS) throw badRequest(`Місць за столом: ${MIN_SEATS}–${MAX_SEATS}`);
+    const plist = await tx
+      .select({ id: players.id, status: players.status })
+      .from(players)
+      .where(eq(players.gameId, gameId));
+    const activeIds = plist.filter((p) => p.status === "active").map((p) => p.id);
+    if (activeIds.length < 2) throw badRequest("Для розсадки потрібно щонайменше двоє гравців у грі");
+    const r = randomSeating(activeIds, seatsPerTable);
+    const seats = new Map(r.moves.map((m) => [m.playerId, m.to]));
+    await writeSeats(
+      tx,
+      gameId,
+      plist.map((p) => ({ playerId: p.id, tableNo: seats.get(p.id)?.tableNo ?? null, seatNo: seats.get(p.id)?.seatNo ?? null })),
+    );
+    await tx.update(games).set({ tables: r.state }).where(eq(games.id, gameId));
+    if (game.chatId) {
+      after(async () => {
+        const state = await loadGameState(gameId);
+        await notifyChat(game.chatId, `🪑 <b>Розсадка</b> · ${escapeHtml(game.name)}\n\n${seatingText(state)}`);
+      });
+    }
+  });
+}
+
+/** Passes the dealer button to the next occupied seat of a table. */
+export async function moveDealerButton(gameId: string, actor: User, tableNo: number) {
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    const current = await tx.select({ tables: games.tables }).from(games).where(eq(games.id, gameId));
+    const tables = current[0]?.tables;
+    if (!tables) throw badRequest("Спершу розсадіть гравців");
+    if (!tables.tables.some((t) => t.no === tableNo)) throw notFound("Стіл не знайдено");
+    const plist = await tx
+      .select({ id: players.id, status: players.status, tableNo: players.tableNo, seatNo: players.seatNo })
+      .from(players)
+      .where(eq(players.gameId, gameId));
+    const next: SeatingState = moveButtonOn(
+      tables,
+      plist.map((p) => ({ id: p.id, active: p.status === "active", tableNo: p.tableNo, seatNo: p.seatNo })),
+      tableNo,
+    );
+    await tx.update(games).set({ tables: next }).where(eq(games.id, gameId));
+  });
+}
+
+/** Re-checks seating (balancing runs on every change anyway; this is the manual trigger). */
+export async function rebalanceTables(gameId: string, actor: User) {
+  await mutateGame(gameId, async ({ game }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    if (!game.tables) throw badRequest("Спершу розсадіть гравців");
+  });
+}
+
+export async function clearSeating(gameId: string, actor: User) {
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    await tx.update(games).set({ tables: null }).where(eq(games.id, gameId));
+    await tx.update(players).set({ tableNo: null, seatNo: null }).where(eq(players.gameId, gameId));
   });
 }
 

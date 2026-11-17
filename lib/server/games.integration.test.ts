@@ -171,4 +171,61 @@ d("game service (integration)", () => {
     expect(G.gameCsv(state, { includeIds: false })).not.toContain(String(anna.id));
     expect(G.gameCsv(state)).toContain(String(anna.id));
   });
+
+  it("seats players, balances tables after eliminations and seats late joiners", async () => {
+    const game = await G.createGame(host, { type: "tournament", startingStack: 1000, playerNames: ["A", "B", "C", "D", "E", "F", "G"] });
+    await G.seatRandom(game.id, host, 4);
+    await expect(G.seatRandom(game.id, anna, 4)).rejects.toThrow(/хост/);
+    let s = await G.loadGameState(game.id);
+    expect(s.game.tables?.tables.map((t) => t.no)).toEqual([1, 2]);
+    const sizes = (st: typeof s) =>
+      st.game.tables!.tables.map((t) => st.players.filter((p) => p.status === "active" && p.tableNo === t.no).length).sort();
+    expect(sizes(s)).toEqual([4, 4]);
+
+    // Bust two players from the same table → the other table sends one over.
+    const t1 = s.players.filter((p) => p.tableNo === 1);
+    for (const p of t1.slice(0, 2)) await G.bustPlayer(game.id, p.id, host);
+    s = await G.loadGameState(game.id);
+    expect(sizes(s)).toEqual([3, 3]);
+
+    // A late joiner gets a seat; seats stay unique.
+    await G.joinGame(game.id, ivan);
+    s = await G.loadGameState(game.id);
+    const ivanP = s.players.find((p) => p.userId === ivan.id)!;
+    expect(ivanP.tableNo).not.toBeNull();
+    const keys = s.players.filter((p) => p.status === "active").map((p) => `${p.tableNo}:${p.seatNo}`);
+    expect(new Set(keys).size).toBe(keys.length);
+
+    // Down to four players → one table.
+    const alive = s.players.filter((p) => p.status === "active");
+    for (const p of alive.slice(0, 3)) await G.bustPlayer(game.id, p.id, host);
+    s = await G.loadGameState(game.id);
+    expect(s.game.tables?.tables).toHaveLength(1);
+    expect(s.players.filter((p) => p.status === "active").every((p) => p.tableNo === s.game.tables!.tables[0].no)).toBe(true);
+
+    const before = s.game.tables!.tables[0].button;
+    await G.moveDealerButton(game.id, host, s.game.tables!.tables[0].no);
+    s = await G.loadGameState(game.id);
+    const btn = s.game.tables!.tables[0].button;
+    expect(btn).not.toBe(before);
+    expect(s.players.some((p) => p.status === "active" && p.seatNo === btn)).toBe(true);
+
+    await G.clearSeating(game.id, host);
+    s = await G.loadGameState(game.id);
+    expect(s.game.tables).toBeNull();
+    expect(s.players.every((p) => p.tableNo == null)).toBe(true);
+  });
+
+  it("builds a player's profile stats from finished games", async () => {
+    const { loadPlayerStats } = await import("./stats");
+    const before = await loadPlayerStats(ivan.id);
+    const { game, pid } = await tournament([anna, ivan]);
+    await G.bustPlayer(game.id, pid(anna), anna);
+    await G.endGame(game.id, host, { [String(pid(ivan))]: 2000 });
+    const after = await loadPlayerStats(ivan.id);
+    expect(after.games).toBe(before.games + 1);
+    expect(after.wins).toBe(before.wins + 1);
+    expect(after.form[0]).toMatchObject({ gameId: game.id, place: 1, entrants: 3 });
+    expect(after.achievements.find((a) => a.id === "first_win")?.achieved).toBe(true);
+  });
 });

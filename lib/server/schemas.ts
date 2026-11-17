@@ -55,6 +55,10 @@ export const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("timer"), timer: z.enum(["start", "pause", "resume", "next", "prev", "reset"]) }),
   z.object({ action: z.literal("end"), finalStacks: z.record(z.string(), chips).optional() }),
   z.object({ action: z.literal("reopen") }),
+  z.object({ action: z.literal("seatRandom"), seatsPerTable: z.number().int().min(2).max(10).default(9) }),
+  z.object({ action: z.literal("moveButton"), tableNo: z.number().int().positive() }),
+  z.object({ action: z.literal("rebalance") }),
+  z.object({ action: z.literal("clearSeating") }),
 ]);
 
 export type GameAction = z.infer<typeof actionSchema>;

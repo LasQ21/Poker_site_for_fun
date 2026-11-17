@@ -9,7 +9,7 @@ import { closeMiniApp, getWebApp } from "@/lib/client/telegram";
 import { recordNavigation } from "@/lib/client/nav";
 import { loadSettings } from "@/lib/client/settings";
 import type { MeDTO } from "@/lib/types";
-import { IconCards, IconHistory, IconSettings, IconTrophy } from "./icons";
+import { IconCards, IconHistory, IconSettings, IconTrophy, IconUser } from "./icons";
 import { Button, Toast } from "./ui";
 
 const ToastCtx = createContext<(msg: string) => void>(() => {});
@@ -23,6 +23,7 @@ const TABS = [
   { href: "/", label: "Ігри", Icon: IconCards, match: (p: string) => p === "/" },
   { href: "/leaderboard", label: "Рейтинг", Icon: IconTrophy, match: (p: string) => p.startsWith("/leaderboard") },
   { href: "/history", label: "Історія", Icon: IconHistory, match: (p: string) => p.startsWith("/history") },
+  { href: "/profile", label: "Профіль", Icon: IconUser, match: (p: string) => p.startsWith("/profile") },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

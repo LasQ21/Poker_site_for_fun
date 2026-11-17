@@ -17,6 +17,7 @@ import { BlindTimer } from "@/components/BlindTimer";
 import { EndGameSheet } from "@/components/EndGameSheet";
 import { GameSettings } from "@/components/GameSettings";
 import { LoginPanel } from "@/components/LoginPanel";
+import { SeatingSection, SeatingSheet } from "@/components/SeatingView";
 import { StackEditor } from "@/components/StackEditor";
 import { StackTable } from "@/components/StackTable";
 import { IconMore } from "@/components/icons";
@@ -35,6 +36,7 @@ export default function GamePage() {
   const [menu, setMenu] = useState(false);
   const [settings, setSettings] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [seating, setSeating] = useState(false);
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -214,6 +216,8 @@ export default function GamePage() {
         </p>
       )}
 
+      <SeatingSection state={state} act={run} onReseat={() => setSeating(true)} />
+
       <Section title="Стеки в часі">
         <StackChart state={state} />
       </Section>
@@ -224,10 +228,14 @@ export default function GamePage() {
         <div className="mb-3 overflow-hidden rounded-[24px] bg-fg/5">
           <Row onClick={share}>📤 Поділитися посиланням</Row>
           <Row href={`/g/${game.id}/summary`}>📊 Підсумок і результати</Row>
+          <Row href={`/g/${game.id}/tv`}>📺 ТВ-режим (таймер на весь екран)</Row>
           <Row onClick={() => openExternal(`${window.location.origin}/api/games/${game.id}/export.csv`)}>⬇️ Експорт CSV</Row>
           {state.chat && <Row href={`/leaderboard/${state.chat.publicId}`}>🏆 Лідерборд групи</Row>}
           {isHost && active && (
             <Row onClick={() => (setMenu(false), setSettings(true))}>⚙️ Налаштування й блайнди</Row>
+          )}
+          {isHost && active && (
+            <Row onClick={() => (setMenu(false), setSeating(true))}>🪑 {game.tables ? "Розсадити заново" : "Розсадка й дилер"}</Row>
           )}
           {isHost && active && (
             <Row
@@ -266,6 +274,7 @@ export default function GamePage() {
         )}
       </Sheet>
 
+      {isHost && <SeatingSheet state={state} open={seating} onClose={() => setSeating(false)} act={run} />}
       {isHost && <GameSettings state={state} open={settings} onClose={() => setSettings(false)} onSaved={() => mutate()} toast={toast} />}
       {isHost && (
         <EndGameSheet

@@ -1,12 +1,13 @@
 import { randomInt } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db";
+import { db, type DbOrTx, type Tx } from "@/lib/db";
 import {
   buyins,
   chatMembers,
   chats,
   games,
+  joinAttempts,
   players,
   seasons,
   stackSnapshots,
@@ -50,6 +51,8 @@ export interface GameState {
   snapshots: { playerId: number; chips: number; t: number }[];
   results: ResultRow[];
   check: ReturnType<typeof chipCheck>;
+  /** Active game nobody touched for a day: its join code is released. */
+  idle: boolean;
 }
 
 export const newGameId = () => nanoid(10);
@@ -63,8 +66,26 @@ function isUniqueViolation(e: unknown): boolean {
   return err?.code === "23505" || err?.cause?.code === "23505";
 }
 
+/** An active game nobody has touched for this long is "idle": its join code goes back to the pool. */
+export const IDLE_MS = 24 * 60 * 60 * 1000;
+
+export function isIdle(game: Pick<Game, "status" | "updatedAt">, now = Date.now()) {
+  return game.status === "active" && now - game.updatedAt.getTime() > IDLE_MS;
+}
+
 /** Gives an active game a fresh 4-digit code (1000–9999) not used by any other active game. */
 export async function assignJoinCode(gameId: string): Promise<string> {
+  // Codes of abandoned games are released first, so the pool never fills up with forgotten games.
+  await db
+    .update(games)
+    .set({ joinCode: null })
+    .where(
+      and(
+        eq(games.status, "active"),
+        isNotNull(games.joinCode),
+        lt(games.updatedAt, new Date(Date.now() - IDLE_MS)),
+      ),
+    );
   for (let attempt = 0; attempt < 6; attempt++) {
     const rows = await db
       .select({ code: games.joinCode })
@@ -91,10 +112,38 @@ export async function findActiveGameByCode(code: string): Promise<Game> {
   const [g] = await db
     .select()
     .from(games)
-    .where(and(eq(games.joinCode, c), eq(games.status, "active")))
+    .where(
+      and(eq(games.joinCode, c), eq(games.status, "active"), gt(games.updatedAt, new Date(Date.now() - IDLE_MS))),
+    )
     .limit(1);
   if (!g) throw notFound("Гру з таким кодом не знайдено (або її вже завершено)");
   return g;
+}
+
+/** Brute-force protection for 4-digit codes: at most this many wrong codes per user per window. */
+export const JOIN_MAX_FAILS = 10;
+export const JOIN_WINDOW_MS = 10 * 60 * 1000;
+
+/** `findActiveGameByCode` with a per-user limit on failed attempts (HTTP 429 when exceeded). */
+export async function findGameByCodeLimited(userId: number, code: string): Promise<Game> {
+  const [{ fails }] = await db
+    .select({ fails: sql<number>`count(*)::int` })
+    .from(joinAttempts)
+    .where(and(eq(joinAttempts.userId, userId), gt(joinAttempts.createdAt, new Date(Date.now() - JOIN_WINDOW_MS))));
+  if (Number(fails) >= JOIN_MAX_FAILS) {
+    throw new AppError(429, "Забагато невдалих спроб. Спробуйте за 10 хвилин");
+  }
+  try {
+    return await findActiveGameByCode(code);
+  } catch (e) {
+    if (e instanceof AppError && e.status === 404) {
+      await db.insert(joinAttempts).values({ userId });
+      if (Math.random() < 0.05) {
+        await db.delete(joinAttempts).where(lt(joinAttempts.createdAt, new Date(Date.now() - 24 * 3600_000)));
+      }
+    }
+    throw e;
+  }
 }
 
 /**
@@ -102,7 +151,7 @@ export async function findActiveGameByCode(code: string): Promise<Game> {
  * then the client lets them pick their seat first.
  */
 export async function joinByCode(actor: User, code: string) {
-  const game = await findActiveGameByCode(code);
+  const game = await findGameByCodeLimited(actor.id, code);
   if (await playerForUser(game.id, actor.id)) return { gameId: game.id, status: "already" as const };
   const [free] = await db
     .select({ id: players.id })
@@ -116,14 +165,14 @@ export async function joinByCode(actor: User, code: string) {
 
 // ---------------------------------------------------------------- loading
 
-export async function getGame(gameId: string): Promise<Game> {
-  const [g] = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
+export async function getGame(gameId: string, q: DbOrTx = db): Promise<Game> {
+  const [g] = await q.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (!g) throw notFound("Гру не знайдено");
   return g;
 }
 
-async function getPlayer(gameId: string, playerId: number): Promise<Player> {
-  const [p] = await db
+async function getPlayer(q: DbOrTx, gameId: string, playerId: number): Promise<Player> {
+  const [p] = await q
     .select()
     .from(players)
     .where(and(eq(players.id, playerId), eq(players.gameId, gameId)))
@@ -133,9 +182,9 @@ async function getPlayer(gameId: string, playerId: number): Promise<Player> {
 }
 
 /** Totals and current stacks for the players of several games at once. */
-async function playerAggregates(gameIds: string[]) {
+async function playerAggregates(gameIds: string[], q: DbOrTx = db) {
   if (!gameIds.length) return { totals: new Map(), stacks: new Map() };
-  const totalsRows = await db
+  const totalsRows = await q
     .select({
       playerId: buyins.playerId,
       chips: sql<number>`coalesce(sum(${buyins.chips}), 0)::int`,
@@ -144,7 +193,7 @@ async function playerAggregates(gameIds: string[]) {
     .from(buyins)
     .where(inArray(buyins.gameId, gameIds))
     .groupBy(buyins.playerId);
-  const stackRows = await db
+  const stackRows = await q
     .selectDistinctOn([stackSnapshots.playerId], {
       playerId: stackSnapshots.playerId,
       chips: stackSnapshots.chips,
@@ -152,11 +201,22 @@ async function playerAggregates(gameIds: string[]) {
     })
     .from(stackSnapshots)
     .where(inArray(stackSnapshots.gameId, gameIds))
-    .orderBy(stackSnapshots.playerId, desc(stackSnapshots.recordedAt), desc(stackSnapshots.id));
+    // Latest by insertion order: ids are allocated under the game lock, timestamps may tie.
+    .orderBy(stackSnapshots.playerId, desc(stackSnapshots.id));
   return {
     totals: new Map<number, { chips: number; count: number }>(totalsRows.map((r) => [r.playerId, r])),
     stacks: new Map<number, { chips: number; recordedAt: Date }>(stackRows.map((r) => [r.playerId, r])),
   };
+}
+
+async function currentStack(q: DbOrTx, playerId: number): Promise<number> {
+  const [s] = await q
+    .select({ chips: stackSnapshots.chips })
+    .from(stackSnapshots)
+    .where(eq(stackSnapshots.playerId, playerId))
+    .orderBy(desc(stackSnapshots.id))
+    .limit(1);
+  return s?.chips ?? 0;
 }
 
 function toPlayerView(
@@ -174,26 +234,28 @@ function toPlayerView(
   };
 }
 
-export async function loadGameState(gameId: string): Promise<GameState> {
-  const game = await getGame(gameId);
-  if (game.status === "active" && !game.joinCode) game.joinCode = await assignJoinCode(game.id);
-  const [hostRow] = await db.select().from(users).where(eq(users.id, game.hostUserId)).limit(1);
+/** Full game state. Outside transactions it also (re)assigns a join code to active games without one. */
+export async function loadGameState(gameId: string, q: DbOrTx = db): Promise<GameState> {
+  const game = await getGame(gameId, q);
+  const idle = isIdle(game);
+  if (q === db && game.status === "active" && !game.joinCode && !idle) game.joinCode = await assignJoinCode(game.id);
+  const [hostRow] = await q.select().from(users).where(eq(users.id, game.hostUserId)).limit(1);
   const chatRow = game.chatId
-    ? (await db.select().from(chats).where(eq(chats.id, game.chatId)).limit(1))[0]
+    ? (await q.select().from(chats).where(eq(chats.id, game.chatId)).limit(1))[0]
     : undefined;
-  const plist = await db.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id));
-  const agg = await playerAggregates([gameId]);
+  const plist = await q.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id));
+  const agg = await playerAggregates([gameId], q);
   const pviews = plist.map((p) => toPlayerView(p, agg));
-  const blist = await db
+  const blist = await q
     .select({ id: buyins.id, playerId: buyins.playerId, chips: buyins.chips, kind: buyins.kind, createdAt: buyins.createdAt })
     .from(buyins)
     .where(eq(buyins.gameId, gameId))
     .orderBy(asc(buyins.createdAt), asc(buyins.id));
-  const snaps = await db
+  const snaps = await q
     .select({ playerId: stackSnapshots.playerId, chips: stackSnapshots.chips, recordedAt: stackSnapshots.recordedAt })
     .from(stackSnapshots)
     .where(eq(stackSnapshots.gameId, gameId))
-    .orderBy(asc(stackSnapshots.recordedAt), asc(stackSnapshots.id));
+    .orderBy(asc(stackSnapshots.id));
 
   return {
     game,
@@ -204,6 +266,7 @@ export async function loadGameState(gameId: string): Promise<GameState> {
     snapshots: snaps.map((s) => ({ playerId: s.playerId, chips: s.chips, t: new Date(s.recordedAt).getTime() })),
     results: computeResults(game, pviews),
     check: chipCheck(pviews.filter((p) => p.status !== "left" || p.currentChips > 0)),
+    idle,
   };
 }
 
@@ -227,8 +290,42 @@ function assertCanEditPlayer(game: Game, player: Player, actor: User) {
   throw forbidden("Можна змінювати лише свій стек");
 }
 
-async function touchGame(gameId: string) {
-  await db.update(games).set({ updatedAt: new Date() }).where(eq(games.id, gameId));
+// ---------------------------------------------------------------- mutation helper
+
+type Effect = () => Promise<unknown>;
+
+interface Mutation {
+  tx: Tx;
+  /** The game row, locked FOR UPDATE until the transaction ends. */
+  game: Game;
+  /** Runs `fn` after a successful commit (Telegram messages, QStash jobs). */
+  after(fn: Effect): void;
+}
+
+/**
+ * Runs a game mutation in a transaction holding a row lock on the game, so concurrent actions on the
+ * same game are serialized (no duplicate places, no lost stack updates). Bumps `version`/`updatedAt`.
+ */
+async function mutateGame<T>(gameId: string, fn: (m: Mutation) => Promise<T>): Promise<T> {
+  const effects: Effect[] = [];
+  const result = await db.transaction(async (tx) => {
+    const [game] = await tx.select().from(games).where(eq(games.id, gameId)).for("update");
+    if (!game) throw notFound("Гру не знайдено");
+    const out = await fn({ tx, game, after: (e) => effects.push(e) });
+    await tx
+      .update(games)
+      .set({ updatedAt: new Date(), version: sql`${games.version} + 1` })
+      .where(eq(games.id, gameId));
+    return out;
+  });
+  for (const e of effects) {
+    try {
+      await e();
+    } catch (err) {
+      console.error("[games] after-commit effect failed", err);
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------- create / settings
@@ -269,29 +366,31 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
   const template = input.blindTemplate ?? (input.type === "cash" ? "cash" : "regular");
   const structure = input.blindStructure?.length ? input.blindStructure : buildStructure(template, input.startingStack);
   const date = new Date().toLocaleDateString("uk-UA", { day: "numeric", month: "short" });
-  const [game] = await db
-    .insert(games)
-    .values({
-      id: newGameId(),
-      name: input.name?.trim() || `${input.type === "cash" ? "Кеш" : "Турнір"} ${date}`,
-      chatId: input.chatId ?? null,
-      seasonId: season?.id ?? null,
-      hostUserId: actor.id,
-      type: input.type,
-      startingStack: input.startingStack,
-      blindStructure: structure,
-      reminderIntervalMin: input.reminderIntervalMin || null,
-    })
-    .returning();
+  const game = await db.transaction(async (tx) => {
+    const [g] = await tx
+      .insert(games)
+      .values({
+        id: newGameId(),
+        name: input.name?.trim() || `${input.type === "cash" ? "Кеш" : "Турнір"} ${date}`,
+        chatId: input.chatId ?? null,
+        seasonId: season?.id ?? null,
+        hostUserId: actor.id,
+        type: input.type,
+        startingStack: input.startingStack,
+        blindStructure: structure,
+        reminderIntervalMin: input.reminderIntervalMin || null,
+      })
+      .returning();
+    const names = (input.playerNames ?? []).map((n) => n.trim()).filter(Boolean);
+    const seats: { name: string; userId: number | null }[] = [
+      ...(input.hostPlays !== false ? [{ name: displayNameOf(actor), userId: actor.id }] : []),
+      ...names.map((name) => ({ name, userId: null })),
+    ];
+    await insertPlayers(tx, g, seats, actor.id);
+    return g;
+  });
 
   game.joinCode = await assignJoinCode(game.id);
-
-  if (input.hostPlays !== false) {
-    await insertPlayer(game, displayNameOf(actor), actor.id, actor.id);
-  }
-  for (const name of input.playerNames ?? []) {
-    if (name.trim()) await insertPlayer(game, name.trim(), null, actor.id);
-  }
   if (game.reminderIntervalMin && game.chatId) await scheduleReminder(game);
   return game;
 }
@@ -304,27 +403,32 @@ export interface UpdateGameInput {
 }
 
 export async function updateGame(gameId: string, actor: User, input: UpdateGameInput) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  const patch: Partial<Game> = { updatedAt: new Date() };
-  if (input.name !== undefined) patch.name = input.name.trim().slice(0, 80) || game.name;
-  if (input.startingStack !== undefined) patch.startingStack = input.startingStack;
-  if (input.blindStructure !== undefined) {
-    if (!input.blindStructure.length) throw badRequest("Структура блайндів порожня");
-    patch.blindStructure = input.blindStructure;
-    patch.blindLevel = Math.min(game.blindLevel, input.blindStructure.length - 1);
-    patch.timerVersion = game.timerVersion + 1;
-  }
-  let reminderChanged = false;
-  if (input.reminderIntervalMin !== undefined) {
-    patch.reminderIntervalMin = input.reminderIntervalMin || null;
-    patch.reminderVersion = game.reminderVersion + 1;
-    reminderChanged = true;
-  }
-  const [updated] = await db.update(games).set(patch).where(eq(games.id, gameId)).returning();
-  if (reminderChanged && updated.status === "active") await scheduleReminder(updated);
-  if (input.blindStructure !== undefined) await scheduleBlindJob(updated);
-  return updated;
+  return mutateGame(gameId, async ({ tx, game, after }) => {
+    assertHost(game, actor);
+    const patch: Partial<Game> = {};
+    if (input.name !== undefined) patch.name = input.name.trim().slice(0, 80) || game.name;
+    if (input.startingStack !== undefined) patch.startingStack = input.startingStack;
+    if (input.blindStructure !== undefined) {
+      if (!input.blindStructure.length) throw badRequest("Структура блайндів порожня");
+      patch.blindStructure = input.blindStructure;
+      patch.blindLevel = Math.min(game.blindLevel, input.blindStructure.length - 1);
+      patch.timerVersion = game.timerVersion + 1;
+    }
+    let reminderChanged = false;
+    if (input.reminderIntervalMin !== undefined) {
+      patch.reminderIntervalMin = input.reminderIntervalMin || null;
+      patch.reminderVersion = game.reminderVersion + 1;
+      reminderChanged = true;
+    }
+    const updated = Object.keys(patch).length
+      ? (await tx.update(games).set(patch).where(eq(games.id, gameId)).returning())[0]
+      : game;
+    after(async () => {
+      if (reminderChanged && updated.status === "active") await scheduleReminder(updated);
+      if (input.blindStructure !== undefined) await scheduleBlindJob(updated);
+    });
+    return updated;
+  });
 }
 
 export async function deleteGame(gameId: string, actor: User) {
@@ -335,52 +439,57 @@ export async function deleteGame(gameId: string, actor: User) {
 
 // ---------------------------------------------------------------- players
 
-async function insertPlayer(game: Game, displayName: string, userId: number | null, actorId: number) {
-  const [p] = await db
+/** Seats players with the starting stack (one buy-in + one stack snapshot each). */
+async function insertPlayers(
+  q: DbOrTx,
+  game: Game,
+  seats: { name: string; userId: number | null }[],
+  actorId: number,
+): Promise<Player[]> {
+  if (!seats.length) return [];
+  const rows = await q
     .insert(players)
-    .values({ gameId: game.id, displayName: displayName.slice(0, 40), userId })
+    .values(seats.map((s) => ({ gameId: game.id, displayName: s.name.slice(0, 40), userId: s.userId })))
     .returning();
-  await db.insert(buyins).values({ gameId: game.id, playerId: p.id, chips: game.startingStack, kind: "buyin", createdBy: actorId });
-  await db.insert(stackSnapshots).values({ gameId: game.id, playerId: p.id, chips: game.startingStack, recordedBy: actorId });
-  return p;
+  await q
+    .insert(buyins)
+    .values(rows.map((p) => ({ gameId: game.id, playerId: p.id, chips: game.startingStack, kind: "buyin" as const, createdBy: actorId })));
+  await q
+    .insert(stackSnapshots)
+    .values(rows.map((p) => ({ gameId: game.id, playerId: p.id, chips: game.startingStack, recordedBy: actorId })));
+  return rows;
 }
 
 export async function addPlayer(gameId: string, actor: User, displayName: string) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  assertActive(game);
-  const name = displayName.trim();
-  if (!name) throw badRequest("Вкажіть ім'я");
-  const p = await insertPlayer(game, name, null, actor.id);
-  await touchGame(gameId);
-  return p;
+  return mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    const name = displayName.trim();
+    if (!name) throw badRequest("Вкажіть ім'я");
+    const [p] = await insertPlayers(tx, game, [{ name, userId: null }], actor.id);
+    return p;
+  });
 }
 
 /** The viewer joins the game: claims a free seat (playerId) or takes a new one. */
 export async function joinGame(gameId: string, actor: User, playerId?: number) {
-  const game = await getGame(gameId);
-  assertActive(game);
-  const [existing] = await db
-    .select()
-    .from(players)
-    .where(and(eq(players.gameId, gameId), eq(players.userId, actor.id)))
-    .limit(1);
-  if (existing) throw badRequest("Ви вже в цій грі");
-  if (playerId != null) {
-    const p = await getPlayer(gameId, playerId);
-    if (p.userId != null) throw badRequest("Це місце вже зайняте");
-    const [updated] = await db
-      .update(players)
-      .set({ userId: actor.id })
-      .where(and(eq(players.id, playerId), isNull(players.userId)))
-      .returning();
-    if (!updated) throw badRequest("Це місце вже зайняте");
-    await touchGame(gameId);
-    return updated;
-  }
-  const p = await insertPlayer(game, displayNameOf(actor), actor.id, actor.id);
-  await touchGame(gameId);
-  return p;
+  return mutateGame(gameId, async ({ tx, game }) => {
+    assertActive(game);
+    const [existing] = await tx
+      .select({ id: players.id })
+      .from(players)
+      .where(and(eq(players.gameId, gameId), eq(players.userId, actor.id)))
+      .limit(1);
+    if (existing) throw badRequest("Ви вже в цій грі");
+    if (playerId != null) {
+      const p = await getPlayer(tx, gameId, playerId);
+      if (p.userId != null) throw badRequest("Це місце вже зайняте");
+      const [updated] = await tx.update(players).set({ userId: actor.id }).where(eq(players.id, playerId)).returning();
+      return updated;
+    }
+    const [p] = await insertPlayers(tx, game, [{ name: displayNameOf(actor), userId: actor.id }], actor.id);
+    return p;
+  });
 }
 
 export async function updatePlayer(
@@ -389,141 +498,156 @@ export async function updatePlayer(
   actor: User,
   input: { displayName?: string; unlink?: boolean; status?: "active" | "left" },
 ) {
-  const game = await getGame(gameId);
-  const player = await getPlayer(gameId, playerId);
-  const host = isHost(game, actor.id);
-  const own = player.userId === actor.id;
-  if (!host && !own) throw forbidden();
-  const patch: Partial<Player> = {};
-  if (input.displayName !== undefined) {
-    const n = input.displayName.trim().slice(0, 40);
-    if (!n) throw badRequest("Вкажіть ім'я");
-    patch.displayName = n;
-  }
-  if (input.unlink) patch.userId = null;
-  if (input.status) patch.status = input.status;
-  if (Object.keys(patch).length) await db.update(players).set(patch).where(eq(players.id, playerId));
-  await touchGame(gameId);
+  await mutateGame(gameId, async ({ tx, game }) => {
+    const player = await getPlayer(tx, gameId, playerId);
+    const host = isHost(game, actor.id);
+    const own = player.userId != null && player.userId === actor.id;
+    if (!host && !own) throw forbidden();
+    const patch: Partial<Player> = {};
+    if (input.displayName !== undefined) {
+      const n = input.displayName.trim().slice(0, 40);
+      if (!n) throw badRequest("Вкажіть ім'я");
+      patch.displayName = n;
+    }
+    if (input.unlink) patch.userId = null;
+    if (input.status && input.status !== player.status) {
+      // Status decides places and points, so only the host may change it (players use bust/rebuy).
+      if (!host) throw forbidden("Статус гравця змінює лише хост");
+      assertActive(game);
+      patch.status = input.status;
+      if (input.status === "active") Object.assign(patch, { finishPlace: null, bustedAt: null });
+    }
+    if (Object.keys(patch).length) await tx.update(players).set(patch).where(eq(players.id, playerId));
+  });
 }
 
 export async function removePlayer(gameId: string, playerId: number, actor: User) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  await getPlayer(gameId, playerId);
-  await db.delete(players).where(eq(players.id, playerId));
-  await touchGame(gameId);
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    await getPlayer(tx, gameId, playerId);
+    await tx.delete(players).where(eq(players.id, playerId));
+  });
 }
 
 // ---------------------------------------------------------------- stacks & buy-ins
 
 export async function setStack(gameId: string, playerId: number, actor: User, chips: number) {
-  const game = await getGame(gameId);
-  assertActive(game);
-  const player = await getPlayer(gameId, playerId);
-  assertCanEditPlayer(game, player, actor);
-  if (!Number.isInteger(chips) || chips < 0) throw badRequest("Стек має бути невід'ємним цілим числом");
-  await db.insert(stackSnapshots).values({ gameId, playerId, chips, recordedBy: actor.id });
-  if (player.status === "busted" && chips > 0 && game.type === "cash") {
-    await db.update(players).set({ status: "active" }).where(eq(players.id, playerId));
-  }
-  await touchGame(gameId);
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertActive(game);
+    const player = await getPlayer(tx, gameId, playerId);
+    assertCanEditPlayer(game, player, actor);
+    if (!Number.isInteger(chips) || chips < 0) throw badRequest("Стек має бути невід'ємним цілим числом");
+    await tx.insert(stackSnapshots).values({ gameId, playerId, chips, recordedBy: actor.id });
+    if (player.status === "busted" && chips > 0 && game.type === "cash") {
+      await tx.update(players).set({ status: "active" }).where(eq(players.id, playerId));
+    }
+  });
 }
 
 export async function addBuyin(gameId: string, playerId: number, actor: User, kind: BuyinKind, chips?: number) {
-  const game = await getGame(gameId);
-  assertActive(game);
-  const player = await getPlayer(gameId, playerId);
-  assertCanEditPlayer(game, player, actor);
-  const amount = chips ?? game.startingStack;
-  if (!Number.isInteger(amount) || amount <= 0) throw badRequest("Сума бай-іну має бути додатною");
-  const agg = await playerAggregates([gameId]);
-  const current = agg.stacks.get(playerId)?.chips ?? 0;
-  await db.insert(buyins).values({ gameId, playerId, chips: amount, kind, createdBy: actor.id });
-  await db.insert(stackSnapshots).values({ gameId, playerId, chips: current + amount, recordedBy: actor.id });
-  if (player.status !== "active") {
-    // A rebuy brings a busted tournament player back in; their place is recalculated later.
-    await db.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
-  }
-  await touchGame(gameId);
-  return { stack: current + amount };
+  return mutateGame(gameId, async ({ tx, game }) => {
+    assertActive(game);
+    const player = await getPlayer(tx, gameId, playerId);
+    assertCanEditPlayer(game, player, actor);
+    const amount = chips ?? game.startingStack;
+    if (!Number.isInteger(amount) || amount <= 0) throw badRequest("Сума бай-іну має бути додатною");
+    const stack = (await currentStack(tx, playerId)) + amount;
+    await tx.insert(buyins).values({ gameId, playerId, chips: amount, kind, createdBy: actor.id });
+    await tx.insert(stackSnapshots).values({ gameId, playerId, chips: stack, recordedBy: actor.id });
+    if (player.status !== "active") {
+      // A rebuy brings a busted tournament player back in; their place is recalculated later.
+      await tx.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
+    }
+    return { stack };
+  });
 }
 
 export async function deleteBuyin(gameId: string, buyinId: number, actor: User) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  assertActive(game);
-  const [b] = await db
-    .select()
-    .from(buyins)
-    .where(and(eq(buyins.id, buyinId), eq(buyins.gameId, gameId)))
-    .limit(1);
-  if (!b) throw notFound("Бай-ін не знайдено");
-  const agg = await playerAggregates([gameId]);
-  const current = agg.stacks.get(b.playerId)?.chips ?? 0;
-  await db.delete(buyins).where(eq(buyins.id, buyinId));
-  await db
-    .insert(stackSnapshots)
-    .values({ gameId, playerId: b.playerId, chips: Math.max(0, current - b.chips), recordedBy: actor.id });
-  await touchGame(gameId);
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    const [b] = await tx
+      .select()
+      .from(buyins)
+      .where(and(eq(buyins.id, buyinId), eq(buyins.gameId, gameId)))
+      .limit(1);
+    if (!b) throw notFound("Бай-ін не знайдено");
+    const [{ count }] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(buyins)
+      .where(eq(buyins.playerId, b.playerId));
+    if (Number(count) <= 1) throw badRequest("Це єдиний бай-ін гравця — щоб прибрати його, видаліть гравця");
+    const current = await currentStack(tx, b.playerId);
+    await tx.delete(buyins).where(eq(buyins.id, buyinId));
+    await tx
+      .insert(stackSnapshots)
+      .values({ gameId, playerId: b.playerId, chips: Math.max(0, current - b.chips), recordedBy: actor.id });
+  });
 }
 
 /** Tournament elimination: stack goes to 0 and the player gets the next free place from the bottom. */
 export async function bustPlayer(gameId: string, playerId: number, actor: User) {
-  const game = await getGame(gameId);
-  assertActive(game);
-  const player = await getPlayer(gameId, playerId);
-  assertCanEditPlayer(game, player, actor);
-  if (player.status !== "active") throw badRequest("Гравець уже вибув");
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(players)
-    .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
-  const place = game.type === "tournament" ? bustPlace(Number(count)) : null;
-  await db
-    .update(players)
-    .set({ status: "busted", finishPlace: place, bustedAt: new Date() })
-    .where(eq(players.id, playerId));
-  await db.insert(stackSnapshots).values({ gameId, playerId, chips: 0, recordedBy: actor.id });
-  await touchGame(gameId);
-  if (game.type === "tournament" && game.chatId) {
-    const left = Number(count) - 1;
-    await notifyChat(
-      game.chatId,
-      `💥 <b>${escapeHtml(player.displayName)}</b> вибуває — ${place}-е місце.` +
-        (left === 1 ? "\n🏆 Залишився один гравець — хост може завершити турнір." : ` У грі ще ${left}.`),
-    );
-  }
-  return { place };
+  return mutateGame(gameId, async ({ tx, game, after }) => {
+    assertActive(game);
+    const player = await getPlayer(tx, gameId, playerId);
+    assertCanEditPlayer(game, player, actor);
+    if (player.status !== "active") throw badRequest("Гравець уже вибув");
+    // Counted under the game lock, so two simultaneous eliminations get different places.
+    const [{ count }] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(players)
+      .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
+    const place = game.type === "tournament" ? bustPlace(Number(count)) : null;
+    await tx
+      .update(players)
+      .set({ status: "busted", finishPlace: place, bustedAt: new Date() })
+      .where(eq(players.id, playerId));
+    await tx.insert(stackSnapshots).values({ gameId, playerId, chips: 0, recordedBy: actor.id });
+    if (game.type === "tournament" && game.chatId) {
+      const left = Number(count) - 1;
+      after(() =>
+        notifyChat(
+          game.chatId,
+          `💥 <b>${escapeHtml(player.displayName)}</b> вибуває — ${place}-е місце.` +
+            (left === 1 ? "\n🏆 Залишився один гравець — хост може завершити турнір." : ` У грі ще ${left}.`),
+        ),
+      );
+    }
+    return { place };
+  });
 }
 
 export async function unbustPlayer(gameId: string, playerId: number, actor: User) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  assertActive(game);
-  await getPlayer(gameId, playerId);
-  await db.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
-  await touchGame(gameId);
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    await getPlayer(tx, gameId, playerId);
+    await tx.update(players).set({ status: "active", finishPlace: null, bustedAt: null }).where(eq(players.id, playerId));
+  });
 }
 
 // ---------------------------------------------------------------- blinds timer
 
 export async function timerAction(gameId: string, actor: User, action: TimerAction) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  assertActive(game);
-  const now = new Date();
-  const next = applyTimerAction(game.blindStructure, game, action, now);
-  const [updated] = await db
-    .update(games)
-    .set({ ...next, timerVersion: game.timerVersion + 1, updatedAt: now })
-    .where(eq(games.id, gameId))
-    .returning();
-  await scheduleBlindJob(updated);
-  if ((action === "next" || action === "prev") && updated.chatId) {
-    const v = computeTimer(updated.blindStructure, updated, now);
-    if (v.status === "running") await notifyChat(updated.chatId, levelMessage(updated, v.levelIndex));
-  }
-  return updated;
+  return mutateGame(gameId, async ({ tx, game, after }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    const now = new Date();
+    const next = applyTimerAction(game.blindStructure, game, action, now);
+    const [updated] = await tx
+      .update(games)
+      .set({ ...next, timerVersion: game.timerVersion + 1 })
+      .where(eq(games.id, gameId))
+      .returning();
+    after(async () => {
+      await scheduleBlindJob(updated);
+      if ((action === "next" || action === "prev") && updated.chatId) {
+        const v = computeTimer(updated.blindStructure, updated, now);
+        if (v.status === "running") await notifyChat(updated.chatId, levelMessage(updated, v.levelIndex));
+      }
+    });
+    return updated;
+  });
 }
 
 export function levelMessage(game: Game, levelIndex: number) {
@@ -595,57 +719,68 @@ export async function handleReminderJob(body: { gameId: string; version: number 
 // ---------------------------------------------------------------- end game
 
 export async function endGame(gameId: string, actor: User, finalStacks?: Record<string, number>) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  assertActive(game);
-  const state = await loadGameState(gameId);
-  for (const p of state.players) {
-    const raw = finalStacks?.[String(p.id)];
-    const chips = raw != null && Number.isInteger(raw) && raw >= 0 ? raw : p.currentChips;
-    if (chips !== p.currentChips) {
-      await db.insert(stackSnapshots).values({ gameId, playerId: p.id, chips, recordedBy: actor.id });
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    assertActive(game);
+    const state = await loadGameState(gameId, tx);
+    const finals = state.players.map((p) => {
+      const raw = finalStacks?.[String(p.id)];
+      const chips = raw != null && Number.isInteger(raw) && raw >= 0 ? raw : p.currentChips;
+      return { p, chips };
+    });
+    const changed = finals.filter((f) => f.chips !== f.p.currentChips);
+    if (changed.length) {
+      await tx
+        .insert(stackSnapshots)
+        .values(changed.map((f) => ({ gameId, playerId: f.p.id, chips: f.chips, recordedBy: actor.id })));
     }
-    await db.update(players).set({ finalChips: chips }).where(eq(players.id, p.id));
-  }
-  if (game.type === "tournament") {
-    // Freeze places for everyone still in, ranked by chips.
-    const fresh = await loadGameState(gameId);
-    for (const r of fresh.results) {
-      await db.update(players).set({ finishPlace: r.place }).where(eq(players.id, r.playerId));
+    if (finals.length) {
+      // Freeze final stacks and (tournaments) places for everyone still in, ranked by chips.
+      const results = computeResults(
+        game,
+        finals.map((f) => ({ ...f.p, currentChips: f.chips, finalChips: f.chips })),
+      );
+      const place = new Map(results.map((r) => [r.playerId, r.place]));
+      const chipsCase = sql.join(finals.map((f) => sql`when ${f.p.id} then ${f.chips}::int`), sql` `);
+      const placeCase = sql.join(finals.map((f) => sql`when ${f.p.id} then ${place.get(f.p.id) ?? null}::int`), sql` `);
+      await tx
+        .update(players)
+        .set({
+          finalChips: sql`case ${players.id} ${chipsCase} end`,
+          ...(game.type === "tournament" ? { finishPlace: sql`case ${players.id} ${placeCase} end` } : {}),
+        })
+        .where(eq(players.gameId, gameId));
     }
-  }
-  await db
-    .update(games)
-    .set({
-      status: "finished",
-      finishedAt: new Date(),
-      updatedAt: new Date(),
-      levelStartedAt: null,
-      pausedRemainingMs: null,
-      timerVersion: game.timerVersion + 1,
-      reminderVersion: game.reminderVersion + 1,
-    })
-    .where(eq(games.id, gameId));
-  const final = await loadGameState(gameId);
-  return final;
+    await tx
+      .update(games)
+      .set({
+        status: "finished",
+        joinCode: null,
+        finishedAt: new Date(),
+        levelStartedAt: null,
+        pausedRemainingMs: null,
+        timerVersion: game.timerVersion + 1,
+        reminderVersion: game.reminderVersion + 1,
+      })
+      .where(eq(games.id, gameId));
+  });
+  return loadGameState(gameId);
 }
 
 export async function reopenGame(gameId: string, actor: User) {
-  const game = await getGame(gameId);
-  assertHost(game, actor);
-  if (game.status !== "finished") throw badRequest("Гра ще триває");
-  await db
-    .update(games)
-    .set({ status: "active", finishedAt: null, joinCode: null, updatedAt: new Date() })
-    .where(eq(games.id, gameId));
+  await mutateGame(gameId, async ({ tx, game }) => {
+    assertHost(game, actor);
+    if (game.status !== "finished") throw badRequest("Гра ще триває");
+    await tx.update(games).set({ status: "active", finishedAt: null, joinCode: null }).where(eq(games.id, gameId));
+    await tx.update(players).set({ finalChips: null }).where(eq(players.gameId, gameId));
+    if (game.type === "tournament") {
+      await tx
+        .update(players)
+        .set({ finishPlace: null })
+        .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
+    }
+  });
   await assignJoinCode(gameId);
-  await db.update(players).set({ finalChips: null }).where(eq(players.gameId, gameId));
-  if (game.type === "tournament") {
-    await db
-      .update(players)
-      .set({ finishPlace: null })
-      .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
-  }
 }
 
 // ---------------------------------------------------------------- text summaries (bot)
@@ -683,12 +818,14 @@ export function summaryText(state: GameState): string {
   );
 }
 
-export function gameCsv(state: GameState): string {
+/** `includeIds`: Telegram user ids are only for the game's own participants, not anonymous visitors. */
+export function gameCsv(state: GameState, opts: { includeIds?: boolean } = {}): string {
   const { game } = state;
+  const ids = opts.includeIds !== false;
   const header = [
     "Місце",
     "Гравець",
-    "Telegram ID",
+    ...(ids ? ["Telegram ID"] : []),
     "Бай-інів",
     "Бай-іни (фішки)",
     "Фінальний стек",
@@ -699,7 +836,7 @@ export function gameCsv(state: GameState): string {
   const rows = state.results.map((r) => [
     r.place,
     r.displayName,
-    r.userId ?? "",
+    ...(ids ? [r.userId ?? ""] : []),
     r.buyinCount,
     r.buyinChips,
     r.finalChips,
@@ -818,3 +955,44 @@ export async function playerForUser(gameId: string, userId: number): Promise<Pla
 }
 
 export { playerAggregates, toPlayerView };
+
+// ---------------------------------------------------------------- API view
+
+export type ViewerRole = "host" | "player" | "viewer";
+
+/**
+ * Game state as one viewer sees it. Outsiders (not host, not seated) get Telegram ids replaced with
+ * stable per-response pseudonyms — equality checks in the UI keep working, real ids don't leak.
+ */
+export function gameStateForViewer(state: GameState, viewer: User | null) {
+  const me = viewer ? state.players.find((p) => p.userId === viewer.id) : undefined;
+  const role: ViewerRole = isHost(state.game, viewer?.id) ? "host" : me ? "player" : "viewer";
+  let s = state;
+  if (role === "viewer") {
+    const alias = new Map<number, number>();
+    const pseudo = (id: number | null) => {
+      if (id == null) return null;
+      if (!alias.has(id)) alias.set(id, -(alias.size + 1));
+      return alias.get(id)!;
+    };
+    s = {
+      ...state,
+      game: { ...state.game, hostUserId: pseudo(state.game.hostUserId)!, chatId: state.game.chatId == null ? null : -1 },
+      host: { ...state.host, id: pseudo(state.host.id)! },
+      players: state.players.map((p) => ({ ...p, userId: pseudo(p.userId) })),
+      results: state.results.map((r) => ({ ...r, userId: pseudo(r.userId), key: `p:${r.playerId}` })),
+    };
+  }
+  return {
+    ...s,
+    viewer: viewer ? { id: viewer.id, firstName: viewer.firstName } : null,
+    role,
+    myPlayerId: me?.id ?? null,
+    serverNow: Date.now(),
+  };
+}
+
+/** Whether the user may see participant details (Telegram ids) of a game. */
+export function isParticipant(state: GameState, userId: number | null | undefined) {
+  return userId != null && (isHost(state.game, userId) || state.players.some((p) => p.userId === userId));
+}

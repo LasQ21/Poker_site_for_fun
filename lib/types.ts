@@ -47,6 +47,8 @@ export interface GameStateDTO {
   role: "host" | "player" | "viewer";
   myPlayerId: number | null;
   serverNow: number;
+  /** Active, but untouched for a day: the join code was released. */
+  idle: boolean;
 }
 
 export interface GameListItemDTO {
@@ -79,4 +81,6 @@ export interface LeaderboardDTO {
   tournament: LeaderboardRow[];
   cash: LeaderboardRow[];
   recent: { id: string; name: string; type: string; finishedAt: string | null; winner: string | null }[];
+  /** The viewer may start/end seasons (game host in this group or group admin). */
+  canManageSeasons: boolean;
 }

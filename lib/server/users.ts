@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chatMembers, chats, users, type User } from "@/lib/db/schema";
 import type { TelegramUser } from "@/lib/auth/telegram";
@@ -42,6 +42,16 @@ export async function touchMember(chatId: number, userId: number) {
     .insert(chatMembers)
     .values({ chatId, userId })
     .onConflictDoUpdate({ target: [chatMembers.chatId, chatMembers.userId], set: { lastSeenAt: new Date() } });
+}
+
+/** A user left (or was removed from) a group. */
+export async function removeMember(chatId: number, userId: number) {
+  await db.delete(chatMembers).where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, userId)));
+}
+
+/** The bot was removed from a group: nobody can be verified as a member any more. */
+export async function forgetChatMembers(chatId: number) {
+  await db.delete(chatMembers).where(eq(chatMembers.chatId, chatId));
 }
 
 export function displayNameOf(u: { firstName: string; lastName?: string | null } | TelegramUser): string {

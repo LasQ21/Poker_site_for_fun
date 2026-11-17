@@ -9,7 +9,7 @@ import { parseChips } from "@/lib/game/parse";
 import { AppError } from "@/lib/server/errors";
 import * as G from "@/lib/server/games";
 import { activeSeason, endSeason, loadLeaderboard, startSeason } from "@/lib/server/leaderboard";
-import { touchMember, upsertChat, upsertUser } from "@/lib/server/users";
+import { forgetChatMembers, removeMember, touchMember, upsertChat, upsertUser } from "@/lib/server/users";
 import { escapeHtml, sendCsv } from "@/lib/telegram/api";
 
 const isGroup = (ctx: Context) => ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
@@ -102,8 +102,8 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
   });
 
   const run =
-    (fn: (ctx: Context) => Promise<unknown>) =>
-    async (ctx: Context) => {
+    <C extends Context>(fn: (ctx: C) => Promise<unknown>) =>
+    async (ctx: C) => {
       try {
         await fn(ctx);
       } catch (e) {
@@ -113,6 +113,29 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
         else await ctx.reply(msg).catch(() => {});
       }
     };
+
+  // Keep chat_members in sync: it gates game creation in the group and its leaderboard/seasons.
+  bot.on("my_chat_member", run(async (ctx) => {
+    const status = ctx.myChatMember.new_chat_member.status;
+    const chat = ctx.myChatMember.chat;
+    if (chat.type !== "group" && chat.type !== "supergroup") return;
+    if (status === "left" || status === "kicked") await forgetChatMembers(chat.id);
+    else await upsertChat(chat.id, chat.title ?? "Група");
+  }));
+
+  bot.on("message:left_chat_member", run(async (ctx) => {
+    const left = ctx.message.left_chat_member;
+    if (left.id === ctx.me.id) await forgetChatMembers(ctx.chat.id);
+    else if (!left.is_bot) await removeMember(ctx.chat.id, left.id);
+  }));
+
+  bot.on("message:new_chat_members", run(async (ctx) => {
+    for (const u of ctx.message.new_chat_members) {
+      if (u.is_bot) continue;
+      await upsertUser(u);
+      await touchMember(ctx.chat.id, u.id);
+    }
+  }));
 
   bot.command(["start", "help"], run(async (ctx) => {
     if (isGroup(ctx)) {
@@ -141,7 +164,9 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
       return;
     }
     const existing = await G.activeGameInChat(ctx.chat!.id);
-    const note = existing ? `\n\n⚠️ Уже є активна гра «${escapeHtml(existing.name)}».` : "";
+    const note = existing
+      ? `\n\n⚠️ Уже є активна гра «${escapeHtml(existing.name)}»${G.isIdle(existing) ? " (неактивна понад добу)" : ""}.`
+      : "";
     await ctx.reply(`Яку гру створити?${note}`, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard().text("💵 Кеш", "ng:cash").text("🏆 Турнір", "ng:tournament"),
@@ -200,7 +225,7 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     const arg = String(ctx.match ?? "").trim();
     if (arg) {
       if (!G.JOIN_CODE_RE.test(arg)) throw new AppError(400, "Код гри — це 4 цифри, напр.: /join 4821");
-      await seatOrAsk(ctx, await G.findActiveGameByCode(arg));
+      await seatOrAsk(ctx, await G.findGameByCodeLimited(ctx.from!.id, arg));
       return;
     }
     if (!isGroup(ctx)) throw new AppError(400, "Напишіть код гри, який показує хост: /join 4821");
@@ -255,7 +280,11 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
   bot.command("standings", run(async (ctx) => {
     const game = await requireActiveGame(ctx);
     const state = await G.loadGameState(game.id);
-    const code = state.game.joinCode ? `\n\nКод гри: <b>${state.game.joinCode}</b>` : "";
+    const code = state.idle
+      ? "\n\n💤 Гра неактивна понад добу, код звільнено. Будь-яка дія за столом її відновить, або хост: /endgame"
+      : state.game.joinCode
+        ? `\n\nКод гри: <b>${state.game.joinCode}</b>`
+        : "";
     await ctx.reply(`📊 <b>${escapeHtml(game.name)}</b>\n\n${G.standingsText(state)}${code}`, {
       parse_mode: "HTML",
       reply_markup: gameButton(game.id),

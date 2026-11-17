@@ -13,10 +13,12 @@ function secretOk(given: string | null) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** One-time bot configuration: webhook, command lists and the Mini App menu button. */
+/**
+ * One-time bot configuration: webhook, command lists and the Mini App menu button.
+ * POST only, secret in the `x-setup-secret` header (never in the URL, where it would end up in logs).
+ */
 export async function POST(req: Request) {
-  const url = new URL(req.url);
-  if (!secretOk(req.headers.get("x-setup-secret") ?? url.searchParams.get("secret"))) {
+  if (!secretOk(req.headers.get("x-setup-secret"))) {
     return new Response("unauthorized", { status: 401 });
   }
   if (!config.botToken || !config.webhookSecret) {
@@ -43,4 +45,3 @@ export async function POST(req: Request) {
   return Response.json({ ok: true, appUrl: base, results });
 }
 
-export const GET = POST;

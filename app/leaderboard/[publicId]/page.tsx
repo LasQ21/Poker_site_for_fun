@@ -8,14 +8,13 @@ import { api, fetcher } from "@/lib/client/api";
 import { useBackButton } from "@/lib/client/telegram";
 import { fmtBuyins, fmtDate, fmtSigned } from "@/lib/format";
 import type { LeaderboardDTO } from "@/lib/types";
-import { useMe, useToast } from "@/components/AppShell";
+import { useToast } from "@/components/AppShell";
 import { Button, Empty, inputCls, PageLoader, Section, Segmented, Sheet, Signed } from "@/components/ui";
 
 export default function LeaderboardPage() {
   const { publicId } = useParams<{ publicId: string }>();
   const router = useRouter();
   const toast = useToast();
-  const { data: me } = useMe();
   const [season, setSeason] = useState<string>("current");
   const { data, error, isLoading, mutate } = useSWR<LeaderboardDTO>(`/api/leaderboard/${publicId}?season=${season}`, fetcher);
   const [tab, setTab] = useState<"tournament" | "cash" | null>(null);
@@ -29,7 +28,6 @@ export default function LeaderboardPage() {
 
   const currentTab = tab ?? (data.gamesCount.tournament >= data.gamesCount.cash ? "tournament" : "cash");
   const rows = currentTab === "tournament" ? data.tournament : data.cash;
-  const isMember = me?.chats.some((c) => c.publicId === publicId);
   const activeSeason = data.seasons.find((s) => s.isActive);
 
   async function newSeason() {
@@ -63,7 +61,7 @@ export default function LeaderboardPage() {
             </option>
           ))}
         </select>
-        {isMember && (
+        {data.canManageSeasons && (
           <Button variant="secondary" size="sm" className="!h-auto shrink-0" onClick={() => setSeasonSheet(true)}>
             Сезон…
           </Button>

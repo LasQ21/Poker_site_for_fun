@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chatMembers, chats, games, players, seasons, type Chat, type Season } from "@/lib/db/schema";
 import { computeLeaderboard, computeResults, type LeaderboardGame, type LeaderboardRow } from "@/lib/game/results";
+import { tgApi } from "@/lib/telegram/api";
 import { badRequest, forbidden, notFound } from "./errors";
 import { playerAggregates, toPlayerView } from "./games";
 
@@ -99,20 +100,50 @@ export async function isChatMember(chatId: number, userId: number) {
   return Boolean(m);
 }
 
+/**
+ * Seasons reset the group's leaderboard, so only people running games may manage them:
+ * someone who hosted a game in this group, or a Telegram admin of the group.
+ */
+export async function canManageSeasons(chatId: number, userId: number): Promise<boolean> {
+  if (!(await isChatMember(chatId, userId))) return false;
+  const [hosted] = await db
+    .select({ id: games.id })
+    .from(games)
+    .where(and(eq(games.chatId, chatId), eq(games.hostUserId, userId)))
+    .limit(1);
+  if (hosted) return true;
+  const api = tgApi();
+  if (!api) return false;
+  try {
+    const m = await api.getChatMember(chatId, userId);
+    return m.status === "creator" || m.status === "administrator";
+  } catch {
+    return false;
+  }
+}
+
+async function assertCanManageSeasons(chatId: number, userId: number) {
+  if (!(await canManageSeasons(chatId, userId))) {
+    throw forbidden("Сезонами керують адміністратори групи або ті, хто проводив тут ігри");
+  }
+}
+
 export async function startSeason(chatId: number, userId: number, name: string) {
-  if (!(await isChatMember(chatId, userId))) throw forbidden("Ви не учасник цієї групи");
+  await assertCanManageSeasons(chatId, userId);
   const n = name.trim().slice(0, 60);
   if (!n) throw badRequest("Вкажіть назву сезону");
-  await db
-    .update(seasons)
-    .set({ isActive: false, endsAt: new Date() })
-    .where(and(eq(seasons.chatId, chatId), eq(seasons.isActive, true)));
-  const [s] = await db.insert(seasons).values({ chatId, name: n }).returning();
-  return s;
+  return db.transaction(async (tx) => {
+    await tx
+      .update(seasons)
+      .set({ isActive: false, endsAt: new Date() })
+      .where(and(eq(seasons.chatId, chatId), eq(seasons.isActive, true)));
+    const [s] = await tx.insert(seasons).values({ chatId, name: n }).returning();
+    return s;
+  });
 }
 
 export async function endSeason(chatId: number, userId: number) {
-  if (!(await isChatMember(chatId, userId))) throw forbidden("Ви не учасник цієї групи");
+  await assertCanManageSeasons(chatId, userId);
   const [s] = await db
     .update(seasons)
     .set({ isActive: false, endsAt: new Date() })

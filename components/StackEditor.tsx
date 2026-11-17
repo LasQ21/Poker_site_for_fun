@@ -212,7 +212,7 @@ export function StackEditor({
                 </span>
                 <span className="flex items-center gap-3 text-hint">
                   {fmtDateTime(b.createdAt)}
-                  {host && (
+                  {host && playerBuyins.length > 1 && (
                     <button
                       type="button"
                       aria-label="Скасувати бай-ін"

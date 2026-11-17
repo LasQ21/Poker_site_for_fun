@@ -89,6 +89,8 @@ export const games = pgTable(
     timerVersion: integer("timer_version").notNull().default(0),
     reminderIntervalMin: integer("reminder_interval_min"),
     reminderVersion: integer("reminder_version").notNull().default(0),
+    /** Bumped by every mutation; drives ETags and the live-update stream. */
+    version: integer("version").notNull().default(0),
     /** 4-digit code to join the game; unique among active games, freed when the game ends. */
     joinCode: text("join_code"),
     createdAt: ts("created_at").notNull().defaultNow(),
@@ -158,10 +160,23 @@ export const stackSnapshots = pgTable(
       .notNull()
       .references(() => players.id, { onDelete: "cascade" }),
     chips: integer("chips").notNull(),
-    recordedAt: ts("recorded_at").notNull().defaultNow(),
+    // clock_timestamp(), not now(): inside a transaction now() is its start time, which breaks
+    // the order of snapshots written by transactions that waited on the game lock.
+    recordedAt: ts("recorded_at").notNull().default(sql`clock_timestamp()`),
     recordedBy: tgId("recorded_by"),
   },
   (t) => [index("snapshots_game_idx").on(t.gameId, t.recordedAt)],
+);
+
+/** Failed join-by-code attempts, for rate limiting code guessing. */
+export const joinAttempts = pgTable(
+  "join_attempts",
+  {
+    id: serial("id").primaryKey(),
+    userId: tgId("user_id").notNull(),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("join_attempts_user_idx").on(t.userId, t.createdAt)],
 );
 
 export type User = typeof users.$inferSelect;

@@ -115,7 +115,16 @@ export default function GamePage() {
         </button>
       </header>
 
-      {active && game.joinCode && (
+      {active && state.idle && (
+        <div className="glass-tint mb-5 rounded-[28px] px-5 py-4">
+          <div className="font-bold">💤 Гра неактивна понад добу</div>
+          <div className="mt-0.5 text-[13px] font-medium text-hint">
+            Код гри звільнено. Будь-яка дія за столом відновить гру з новим кодом{isHost ? " — або завершіть її в меню." : "."}
+          </div>
+        </div>
+      )}
+
+      {active && !state.idle && game.joinCode && (
         <button
           type="button"
           onClick={async () => {

@@ -1,21 +1,31 @@
-import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import { neon } from "@neondatabase/serverless";
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
 import { Pool } from "pg";
 import * as schema from "./schema";
 
-type Db = ReturnType<typeof drizzlePg<typeof schema>>;
+export type Db = ReturnType<typeof drizzlePg<typeof schema>>;
+/** A transaction handle; every query helper accepts either `db` or a `tx`. */
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type DbOrTx = Db | Tx;
 
 let instance: Db | undefined;
 
 function create(): Db {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  // Neon's HTTP driver is the cheapest option on serverless; plain TCP elsewhere (local dev, CI).
   if (/\.neon\.tech/.test(url)) {
-    return drizzleNeon(neon(url), { schema }) as unknown as Db;
+    // Neon over WebSockets: unlike the HTTP driver it supports interactive transactions
+    // (SELECT … FOR UPDATE), which serialize concurrent actions on the same game.
+    if (!neonConfig.webSocketConstructor && typeof globalThis.WebSocket === "function") {
+      neonConfig.webSocketConstructor = globalThis.WebSocket;
+    }
+    const pool = new NeonPool({ connectionString: url, max: 5, idleTimeoutMillis: 20_000 });
+    pool.on("error", (e: Error) => console.error("[db] pool error", e));
+    return drizzleNeon(pool, { schema }) as unknown as Db;
   }
   const pool = new Pool({ connectionString: url, max: 5 });
+  pool.on("error", (e) => console.error("[db] pool error", e));
   return drizzlePg(pool, { schema });
 }
 

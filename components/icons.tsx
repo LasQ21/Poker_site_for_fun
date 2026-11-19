@@ -83,3 +83,16 @@ export const IconNext = (p: SVGProps<SVGSVGElement>) => (
     <path d="M17.5 6v12" />
   </svg>
 );
+
+export const IconUser = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="8.2" r="3.7" />
+    <path d="M4.8 20c.9-3.6 3.7-5.6 7.2-5.6s6.3 2 7.2 5.6" />
+  </svg>
+);
+
+export const IconStop = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" fill="currentColor" stroke="none" />
+  </svg>
+);

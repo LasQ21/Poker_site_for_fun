@@ -11,7 +11,7 @@ import { LoginPanel } from "@/components/LoginPanel";
 import { Button, Choice, Field, inputCls, PageLoader, Section, Segmented } from "@/components/ui";
 
 const STACKS = [5_000, 10_000, 20_000, 50_000];
-const REMINDERS = [0, 15, 30, 45, 60];
+const TURNS = [0, 20, 30, 45, 60];
 
 export default function NewGamePage() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export default function NewGamePage() {
   const [name, setName] = useState("");
   const [stack, setStack] = useState(10_000);
   const [template, setTemplate] = useState<BlindTemplateId>("regular");
-  const [reminder, setReminder] = useState(30);
+  const [turn, setTurn] = useState(30);
   const [chatId, setChatId] = useState<number | null>(null);
   const [hostPlays, setHostPlays] = useState(true);
   const [names, setNames] = useState<string[]>([]);
@@ -54,7 +54,7 @@ export default function NewGamePage() {
         name: name || undefined,
         startingStack: stack,
         blindTemplate: effectiveTemplate,
-        reminderIntervalMin: chatId ? reminder : 0,
+        turnSeconds: turn,
         chatId,
         hostPlays,
         playerNames: all,
@@ -87,8 +87,8 @@ export default function NewGamePage() {
           />
           <p className="mt-2 px-1 text-[13px] text-hint">
             {type === "cash"
-              ? "Гравці докуповують фішки; результат — фінальний стек мінус бай-іни (у фішках і бай-інах)."
-              : "Гравці вибувають, місця дають очки сезону: N − місце + 1, переможцю +2."}
+              ? "Під час гри — лише ребаї. Наприкінці хост вносить фінальні стеки: результат = стек − бай-іни."
+              : "Гравці вибувають, місця дають очки сезону: N − місце + 1, переможцю +2. Стеки рахувати не треба."}
           </p>
         </div>
         <Field label="Назва (необов'язково)">
@@ -136,10 +136,26 @@ export default function NewGamePage() {
         </Section>
       )}
 
+      <Section title="Таймер ходу">
+        <div className="px-4 py-3.5" role="group" aria-labelledby="turn-label">
+          <span id="turn-label" className="mb-1.5 block text-[13px] font-semibold text-hint">
+            Секунд на рішення
+          </span>
+          <div className="flex gap-2">
+            {TURNS.map((s) => (
+              <Choice key={s} active={turn === s} onClick={() => setTurn(s)}>
+                {s ? `${s} с` : "Вимк."}
+              </Choice>
+            ))}
+          </div>
+          <span className="mt-1.5 block text-xs text-hint">Великий таймер на екрані гри: торкнулися — пішов відлік для наступного гравця.</span>
+        </div>
+      </Section>
+
       <Section title="Група Telegram">
         {me.chats.length ? (
           <>
-            <Field label="Прив'язати до групи" hint="Ігри групи потрапляють у її лідерборд; бот пише туди нагадування і зміни блайндів.">
+            <Field label="Прив'язати до групи" hint="Ігри групи потрапляють у її лідерборд і профілі гравців; бот пише туди про підвищення блайндів.">
               <select className={inputCls} value={chatId ?? ""} onChange={(e) => setChatId(e.target.value ? Number(e.target.value) : null)}>
                 <option value="">Без групи</option>
                 {me.chats.map((c) => (
@@ -149,17 +165,6 @@ export default function NewGamePage() {
                 ))}
               </select>
             </Field>
-            {chatId && (
-              <Field label="Нагадування оновити стеки">
-                <div className="flex gap-2">
-                  {REMINDERS.map((m) => (
-                    <Choice key={m} active={reminder === m} onClick={() => setReminder(m)}>
-                      {m ? `${m} хв` : "Вимк."}
-                    </Choice>
-                  ))}
-                </div>
-              </Field>
-            )}
           </>
         ) : (
           <div className="px-4 py-3 text-[13px] text-hint">

@@ -1,14 +1,13 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
-import { computeTimer, type TimerAction } from "@/lib/game/blinds";
+import { useCallback, useState } from "react";
+import type { TimerAction } from "@/lib/game/blinds";
 import { api } from "@/lib/client/api";
-import { useGame, useNow } from "@/lib/client/useGame";
+import { useGame } from "@/lib/client/useGame";
 import { confirmDialog, haptic, isMiniApp, openExternal, useBackButton } from "@/lib/client/telegram";
-import { fmtChips, fmtSigned } from "@/lib/format";
+import { fmtChips } from "@/lib/format";
 import type { GameActionInput } from "@/lib/server/schemas";
 import type { PlayerDTO } from "@/lib/types";
 import { useMe, useToast } from "@/components/AppShell";
@@ -16,12 +15,11 @@ import { BlindTimer } from "@/components/BlindTimer";
 import { EndGameSheet } from "@/components/EndGameSheet";
 import { GameSettings } from "@/components/GameSettings";
 import { LoginPanel } from "@/components/LoginPanel";
-import { StackEditor } from "@/components/StackEditor";
-import { StackTable } from "@/components/StackTable";
+import { PlayerList } from "@/components/PlayerList";
+import { PlayerSheet } from "@/components/PlayerSheet";
+import { TurnTimer } from "@/components/TurnTimer";
 import { IconMore } from "@/components/icons";
 import { Badge, Button, Empty, inputCls, PageLoader, Row, Section, Sheet } from "@/components/ui";
-
-const StackChart = dynamic(() => import("@/components/StackChart"), { ssr: false, loading: () => <div className="h-[260px]" /> });
 
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
@@ -29,7 +27,6 @@ export default function GamePage() {
   const toast = useToast();
   const { data: me } = useMe();
   const { data: state, error, isLoading, act, clockOffset, mutate } = useGame(gameId);
-  const now = useNow(15_000);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [menu, setMenu] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -54,17 +51,6 @@ export default function GamePage() {
     },
     [act, toast],
   );
-
-  const bb = useMemo(() => {
-    if (!state) return 0;
-    const g = state.game;
-    const v = computeTimer(
-      g.blindStructure,
-      { blindLevel: g.blindLevel, levelStartedAt: g.levelStartedAt ? new Date(g.levelStartedAt) : null, pausedRemainingMs: g.pausedRemainingMs },
-      new Date(now + clockOffset),
-    );
-    return v.level.isBreak ? (g.blindStructure.slice(0, v.levelIndex).reverse().find((l) => !l.isBreak)?.bb ?? 0) : v.level.bb;
-  }, [state, now, clockOffset]);
 
   if (isLoading) return <PageLoader />;
   if (error || !state) return <Empty icon="🤷" title="Гру не знайдено">{error?.message}</Empty>;
@@ -145,12 +131,13 @@ export default function GamePage() {
       )}
 
       {active && <BlindTimer game={game} clockOffset={clockOffset} isHost={isHost} onAction={(a: TimerAction) => run({ action: "timer", timer: a })} />}
+      {active && game.turnSeconds > 0 && <TurnTimer seconds={game.turnSeconds} />}
 
       {active && state.role === "viewer" && state.viewer && (
         <Section>
           <div className="p-4">
             <div className="font-display font-bold">Ви граєте?</div>
-            <div className="mb-3 text-sm text-hint">Оберіть своє місце, щоб оновлювати власний стек.</div>
+            <div className="mb-3 text-sm text-hint">Оберіть своє місце — ігри потраплять у вашу статистику.</div>
             <div className="flex flex-wrap gap-2">
               {freeSeats.map((p) => (
                 <Button key={p.id} size="sm" variant="secondary" onClick={() => run({ action: "join", playerId: p.id }, `Ви — ${p.displayName}`)}>
@@ -168,16 +155,10 @@ export default function GamePage() {
 
       <Section
         title={`Гравці (${state.players.length})`}
-        action={
-          state.check.diff !== 0 ? (
-            <span className="text-[13px] font-bold text-neg">⚠ {fmtSigned(state.check.diff)} фішок</span>
-          ) : (
-            <span className="text-[13px] font-semibold text-hint tabular">на столі {fmtChips(state.check.totalStacks)}</span>
-          )
-        }
+        action={<span className="text-[13px] font-semibold text-hint tabular">куплено {fmtChips(state.check.totalBuyins)}</span>}
       >
         {state.players.length ? (
-          <StackTable state={state} now={now} bb={bb} onSelect={(p: PlayerDTO) => setSelectedId(p.id)} />
+          <PlayerList state={state} onSelect={(p: PlayerDTO) => setSelectedId(p.id)} />
         ) : (
           <Empty icon="🪑" title="За столом нікого" />
         )}
@@ -197,17 +178,13 @@ export default function GamePage() {
           </div>
         )}
       </Section>
-      {state.check.diff !== 0 && (
-        <p className="-mt-2 mb-4 px-4 text-[13px] text-hint">
-          За столом {fmtChips(state.check.totalStacks)}, куплено {fmtChips(state.check.totalBuyins)}. Хтось, мабуть, не оновив стек.
-        </p>
+      {isHost && active && state.players.length > 0 && (
+        <Button size="lg" className="mb-5 w-full" onClick={() => setEnding(true)}>
+          🏁 Завершити й порахувати стеки
+        </Button>
       )}
 
-      <Section title="Стеки в часі">
-        <StackChart state={state} />
-      </Section>
-
-      <StackEditor state={state} player={selected} onClose={() => setSelectedId(null)} act={run} />
+      <PlayerSheet state={state} player={selected} onClose={() => setSelectedId(null)} act={run} />
 
       <Sheet open={menu} onClose={() => setMenu(false)} title="Гра">
         <div className="mb-3 overflow-hidden rounded-[24px] bg-fg/5">
@@ -215,8 +192,11 @@ export default function GamePage() {
           <Row href={`/g/${game.id}/summary`}>📊 Підсумок і результати</Row>
           <Row onClick={() => openExternal(`${window.location.origin}/api/games/${game.id}/export.csv`)}>⬇️ Експорт CSV</Row>
           {state.chat && <Row href={`/leaderboard/${state.chat.publicId}`}>🏆 Лідерборд групи</Row>}
+          {state.myPlayerId != null && state.viewer && (
+            <Row href={state.chat ? `/profile/u%3A${state.viewer.id}?chat=${state.chat.publicId}` : "/profile"}>👤 Моя статистика</Row>
+          )}
           {isHost && active && (
-            <Row onClick={() => (setMenu(false), setSettings(true))}>⚙️ Налаштування й блайнди</Row>
+            <Row onClick={() => (setMenu(false), setSettings(true))}>⚙️ Блайнди й таймер ходу</Row>
           )}
           {isHost && active && (
             <Row

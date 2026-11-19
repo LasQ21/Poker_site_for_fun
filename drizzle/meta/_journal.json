@@ -15,6 +15,13 @@
       "when": 1794860582436,
       "tag": "0001_join_code",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795118449824,
+      "tag": "0002_turn_timer",
+      "breakpoints": true
     }
   ]
 }

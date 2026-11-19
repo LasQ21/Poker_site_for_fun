@@ -239,7 +239,7 @@ export interface CreateGameInput {
   startingStack: number;
   blindTemplate?: BlindTemplateId;
   blindStructure?: BlindLevel[];
-  reminderIntervalMin?: number | null;
+  turnSeconds?: number;
   chatId?: number | null;
   hostPlays?: boolean;
   playerNames?: string[];
@@ -280,7 +280,7 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
       type: input.type,
       startingStack: input.startingStack,
       blindStructure: structure,
-      reminderIntervalMin: input.reminderIntervalMin || null,
+      turnSeconds: input.turnSeconds ?? 30,
     })
     .returning();
 
@@ -292,13 +292,12 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
   for (const name of input.playerNames ?? []) {
     if (name.trim()) await insertPlayer(game, name.trim(), null, actor.id);
   }
-  if (game.reminderIntervalMin && game.chatId) await scheduleReminder(game);
   return game;
 }
 
 export interface UpdateGameInput {
   name?: string;
-  reminderIntervalMin?: number | null;
+  turnSeconds?: number;
   blindStructure?: BlindLevel[];
   startingStack?: number;
 }
@@ -315,14 +314,8 @@ export async function updateGame(gameId: string, actor: User, input: UpdateGameI
     patch.blindLevel = Math.min(game.blindLevel, input.blindStructure.length - 1);
     patch.timerVersion = game.timerVersion + 1;
   }
-  let reminderChanged = false;
-  if (input.reminderIntervalMin !== undefined) {
-    patch.reminderIntervalMin = input.reminderIntervalMin || null;
-    patch.reminderVersion = game.reminderVersion + 1;
-    reminderChanged = true;
-  }
+  if (input.turnSeconds !== undefined) patch.turnSeconds = input.turnSeconds;
   const [updated] = await db.update(games).set(patch).where(eq(games.id, gameId)).returning();
-  if (reminderChanged && updated.status === "active") await scheduleReminder(updated);
   if (input.blindStructure !== undefined) await scheduleBlindJob(updated);
   return updated;
 }
@@ -414,20 +407,9 @@ export async function removePlayer(gameId: string, playerId: number, actor: User
   await touchGame(gameId);
 }
 
-// ---------------------------------------------------------------- stacks & buy-ins
-
-export async function setStack(gameId: string, playerId: number, actor: User, chips: number) {
-  const game = await getGame(gameId);
-  assertActive(game);
-  const player = await getPlayer(gameId, playerId);
-  assertCanEditPlayer(game, player, actor);
-  if (!Number.isInteger(chips) || chips < 0) throw badRequest("Стек має бути невід'ємним цілим числом");
-  await db.insert(stackSnapshots).values({ gameId, playerId, chips, recordedBy: actor.id });
-  if (player.status === "busted" && chips > 0 && game.type === "cash") {
-    await db.update(players).set({ status: "active" }).where(eq(players.id, playerId));
-  }
-  await touchGame(gameId);
-}
+// ---------------------------------------------------------------- buy-ins
+// Stacks are not tracked during play: a player's chips are what they bought in,
+// and the host records the final stacks once, when the game ends.
 
 export async function addBuyin(gameId: string, playerId: number, actor: User, kind: BuyinKind, chips?: number) {
   const game = await getGame(gameId);
@@ -473,19 +455,20 @@ export async function bustPlayer(gameId: string, playerId: number, actor: User) 
   assertActive(game);
   const player = await getPlayer(gameId, playerId);
   assertCanEditPlayer(game, player, actor);
+  if (game.type !== "tournament") throw badRequest("У кеш-грі гравці не вибувають — фінальний стек вводиться в кінці гри");
   if (player.status !== "active") throw badRequest("Гравець уже вибув");
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(players)
     .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
-  const place = game.type === "tournament" ? bustPlace(Number(count)) : null;
+  const place = bustPlace(Number(count));
   await db
     .update(players)
     .set({ status: "busted", finishPlace: place, bustedAt: new Date() })
     .where(eq(players.id, playerId));
   await db.insert(stackSnapshots).values({ gameId, playerId, chips: 0, recordedBy: actor.id });
   await touchGame(gameId);
-  if (game.type === "tournament" && game.chatId) {
+  if (game.chatId) {
     const left = Number(count) - 1;
     await notifyChat(
       game.chatId,
@@ -563,35 +546,6 @@ export async function handleBlindJob(body: { gameId: string; version: number; le
   return "ok";
 }
 
-// ---------------------------------------------------------------- reminders
-
-const REMINDER_MAX_AGE_MS = 16 * 60 * 60 * 1000;
-
-export async function scheduleReminder(game: Game) {
-  if (!game.chatId || !game.reminderIntervalMin || game.status !== "active") return;
-  await scheduleJob(
-    "/api/jobs/reminder",
-    { gameId: game.id, version: game.reminderVersion },
-    new Date(Date.now() + game.reminderIntervalMin * 60_000),
-  );
-}
-
-export async function handleReminderJob(body: { gameId: string; version: number }) {
-  const [game] = await db.select().from(games).where(eq(games.id, body.gameId)).limit(1);
-  if (!game || game.status !== "active" || game.reminderVersion !== body.version || !game.reminderIntervalMin) {
-    return "stale";
-  }
-  if (Date.now() - game.createdAt.getTime() > REMINDER_MAX_AGE_MS) return "expired";
-  const state = await loadGameState(game.id);
-  await notifyChat(
-    game.chatId,
-    `🔔 Час оновити стеки! <i>${escapeHtml(game.name)}</i>\n\n${standingsText(state)}\n\nНапишіть <code>/stack 12500</code> або відкрийте застосунок.`,
-    urlButton("🃏 Оновити стек", miniAppLink(game.id)),
-  );
-  await scheduleReminder(game);
-  return "ok";
-}
-
 // ---------------------------------------------------------------- end game
 
 export async function endGame(gameId: string, actor: User, finalStacks?: Record<string, number>) {
@@ -623,7 +577,6 @@ export async function endGame(gameId: string, actor: User, finalStacks?: Record<
       levelStartedAt: null,
       pausedRemainingMs: null,
       timerVersion: game.timerVersion + 1,
-      reminderVersion: game.reminderVersion + 1,
     })
     .where(eq(games.id, gameId));
   const final = await loadGameState(gameId);
@@ -652,18 +605,20 @@ export async function reopenGame(gameId: string, actor: User) {
 
 export function standingsText(state: GameState): string {
   const { game } = state;
-  const lines = state.results.map((r) => {
-    const p = state.players.find((x) => x.id === r.playerId)!;
-    const name = escapeHtml(r.displayName);
-    if (game.type === "tournament") {
-      if (p.status === "busted") return `  ${r.place}. <s>${name}</s>`;
-      return `  ${r.place}. ${name} — ${fmtChips(r.finalChips)}`;
-    }
-    return `  ${r.place}. ${name} — ${fmtChips(r.finalChips)} (${fmtSigned(r.netChips)})`;
-  });
-  const diff = state.check.diff;
-  const warn = diff !== 0 ? `\n⚠️ Розбіжність фішок: ${fmtSigned(diff)}` : "";
-  return (lines.join("\n") || "  поки нікого") + warn;
+  const lines =
+    game.type === "tournament"
+      ? state.results.map((r) => {
+          const p = state.players.find((x) => x.id === r.playerId)!;
+          const name = escapeHtml(r.displayName);
+          const rebuys = r.buyinCount > 1 ? ` · ${r.buyinCount} БІ` : "";
+          return p.status === "busted" ? `  ${r.place}. <s>${name}</s>${rebuys}` : `  • ${name} — у грі${rebuys}`;
+        })
+      : [...state.players]
+          .sort((a, b) => b.buyinChips - a.buyinChips || a.displayName.localeCompare(b.displayName))
+          .map((p) => `  • ${escapeHtml(p.displayName)} — ${fmtChips(p.buyinChips)} (${p.buyinCount} БІ)`);
+  const total = state.players.reduce((s, p) => s + p.buyinChips, 0);
+  const foot = state.players.length ? `\n\nУ грі куплено ${fmtChips(total)} фішок.` : "";
+  return (lines.join("\n") || "  поки нікого") + foot;
 }
 
 export function summaryText(state: GameState): string {

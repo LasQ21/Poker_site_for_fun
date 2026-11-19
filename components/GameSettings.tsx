@@ -7,6 +7,8 @@ import { haptic } from "@/lib/client/telegram";
 import type { GameStateDTO } from "@/lib/types";
 import { Button, inputCls, Sheet } from "./ui";
 
+export const TURN_CHOICES = [0, 20, 30, 45, 60];
+
 const num = (s: string) => Number(s.replace(/\D/g, "")) || 0;
 
 export function GameSettings({
@@ -24,14 +26,14 @@ export function GameSettings({
 }) {
   const { game } = state;
   const [name, setName] = useState(game.name);
-  const [reminder, setReminder] = useState(game.reminderIntervalMin ?? 0);
+  const [turn, setTurn] = useState(game.turnSeconds);
   const [levels, setLevels] = useState<BlindLevel[]>(game.blindStructure);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
       setName(game.name);
-      setReminder(game.reminderIntervalMin ?? 0);
+      setTurn(game.turnSeconds);
       setLevels(game.blindStructure);
     }
   }, [open, game]);
@@ -41,8 +43,7 @@ export function GameSettings({
   async function save() {
     setBusy(true);
     try {
-      const body: Record<string, unknown> = { name };
-      if (game.chatId) body.reminderIntervalMin = reminder;
+      const body: Record<string, unknown> = { name, turnSeconds: turn };
       if (JSON.stringify(levels) !== JSON.stringify(game.blindStructure)) body.blindStructure = levels;
       await api(`/api/games/${game.id}`, "PATCH", body);
       haptic("success");
@@ -63,23 +64,22 @@ export function GameSettings({
         <input className={inputCls} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
       </label>
 
-      {game.chatId ? (
-        <div className="mb-4">
-          <span className="mb-1 block text-[13px] text-hint">Нагадування в групу оновити стеки</span>
-          <div className="flex gap-2">
-            {[0, 15, 30, 45, 60].map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setReminder(m)}
-                className={`flex-1 rounded-full py-2.5 text-sm font-bold ${reminder === m ? "glass-tint" : "bg-fg/6"}`}
-              >
-                {m ? `${m} хв` : "Вимк."}
-              </button>
-            ))}
-          </div>
+      <div className="mb-4">
+        <span className="mb-1 block text-[13px] text-hint">Таймер ходу (секунд на рішення)</span>
+        <div className="flex gap-2">
+          {TURN_CHOICES.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setTurn(m)}
+              aria-pressed={turn === m}
+              className={`flex-1 rounded-full py-2.5 text-sm font-bold ${turn === m ? "glass-tint" : "bg-fg/6"}`}
+            >
+              {m ? `${m} с` : "Вимк."}
+            </button>
+          ))}
         </div>
-      ) : null}
+      </div>
 
       <div className="mb-2 flex items-center justify-between">
         <span className="px-1 text-[15px] font-bold">Структура блайндів</span>

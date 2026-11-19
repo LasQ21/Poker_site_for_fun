@@ -2,13 +2,14 @@ import { Bot, Context, InlineKeyboard } from "grammy";
 import type { BotCommand, UserFromGetMe } from "grammy/types";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { chats, users } from "@/lib/db/schema";
 import { appUrl, config, gameWebUrl, miniAppLink, setDetectedBotUsername } from "@/lib/config";
-import { fmtBuyins, fmtChips, fmtDate } from "@/lib/format";
+import { fmtBuyins, fmtChips, fmtDate, fmtSigned } from "@/lib/format";
 import { parseChips } from "@/lib/game/parse";
 import { AppError } from "@/lib/server/errors";
 import * as G from "@/lib/server/games";
 import { activeSeason, endSeason, loadLeaderboard, startSeason } from "@/lib/server/leaderboard";
+import { loadProfile, type ProfileData } from "@/lib/server/profile";
 import { touchMember, upsertChat, upsertUser } from "@/lib/server/users";
 import { escapeHtml, sendCsv } from "@/lib/telegram/api";
 
@@ -18,6 +19,7 @@ export const PRIVATE_COMMANDS: BotCommand[] = [
   { command: "start", description: "Відкрити покер-трекер" },
   { command: "join", description: "Приєднатися за кодом: /join 1234" },
   { command: "newgame", description: "Створити гру" },
+  { command: "stats", description: "Моя статистика" },
   { command: "history", description: "Мої останні ігри" },
   { command: "help", description: "Довідка" },
 ];
@@ -25,11 +27,11 @@ export const PRIVATE_COMMANDS: BotCommand[] = [
 export const GROUP_COMMANDS: BotCommand[] = [
   { command: "newgame", description: "Нова гра (кеш або турнір)" },
   { command: "join", description: "Сісти за стіл: /join або /join 1234" },
-  { command: "stack", description: "Оновити свій стек: /stack 12500" },
   { command: "rebuy", description: "Ребай (можна вказати суму)" },
   { command: "out", description: "Вибув (турнір)" },
-  { command: "standings", description: "Поточна таблиця" },
+  { command: "standings", description: "Хто за столом і скільки купив" },
   { command: "endgame", description: "Завершити гру (хост)" },
+  { command: "stats", description: "Моя статистика в групі" },
   { command: "leaderboard", description: "Лідерборд сезону" },
   { command: "season", description: "Сезон: /season new <назва> | /season end" },
   { command: "history", description: "Останні ігри групи" },
@@ -38,19 +40,44 @@ export const GROUP_COMMANDS: BotCommand[] = [
 
 const HELP = `<b>Покер-трекер</b> — облік стеків у домашній грі (без грошей, лише фішки та очки).
 
+Під час гри нічого перераховувати не треба: бот пам'ятає бай-іни й ребаї, а фінальні стеки хост вносить один раз — у кінці.
+
 <b>У групі:</b>
 /newgame — створити гру (кеш чи турнір)
 /join — сісти за стіл (або /join 1234 — за кодом гри, працює і в приваті)
-/stack 12500 — оновити свій стек
 /rebuy — ребай (або /rebuy 5000)
 /out — вибув із турніру
-/standings — таблиця
+/standings — хто за столом
 /endgame — завершити (хост): підсумок + CSV
+/stats — моя статистика
 /leaderboard — лідерборд сезону
 /season new Осінь — новий сезон, /season end — завершити
 /history — останні ігри
 
-Решта — у застосунку: таймер блайндів, графік стеків, бай-іни.`;
+У застосунку: таймер блайндів, таймер ходу, профілі гравців із графіками.`;
+
+function profileText(p: ProfileData): string {
+  const s = p.stats;
+  const where = p.chat ? ` у «${escapeHtml(p.chat.title)}»` : "";
+  if (!s.games) return `📊 <b>${escapeHtml(p.name)}</b>${where}: ще немає завершених ігор.`;
+  const lines = [
+    `📊 <b>${escapeHtml(p.name)}</b>${where}`,
+    `${s.games} ігор · ${s.wins} 🥇 · ${s.podiums} у топ-3 · ${Math.round(s.winRate * 100)}% перемог`,
+  ];
+  if (s.tournament.games) {
+    lines.push(
+      `\n🏆 <b>Турніри</b> (${s.tournament.games}): ${s.tournament.points} очк., сер. місце ${s.tournament.avgPlace}, найкраще — ${s.tournament.bestPlace}-е`,
+    );
+  }
+  if (s.cash.games) {
+    lines.push(
+      `\n💵 <b>Кеш</b> (${s.cash.games}): ${fmtBuyins(s.cash.netBuyins)} (${fmtSigned(s.cash.netChips)} фішок), у плюсі ${s.cash.profitable} з ${s.cash.games}` +
+        (s.cash.best && s.cash.best.value > 0 ? `\nНайкраща гра: ${escapeHtml(s.cash.best.name)} (${fmtBuyins(s.cash.best.value)})` : ""),
+    );
+  }
+  if (s.bestWinStreak > 1) lines.push(`\n🔥 Найдовша серія перемог: ${s.bestWinStreak}`);
+  return lines.join("\n");
+}
 
 function gameButton(gameId: string, text = "🃏 Відкрити гру") {
   return new InlineKeyboard().url(text, miniAppLink(gameId));
@@ -156,7 +183,6 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
       type,
       startingStack: 10_000,
       chatId,
-      reminderIntervalMin: 30,
       hostPlays: true,
     });
     await ctx.answerCallbackQuery({ text: "Гру створено!" });
@@ -215,22 +241,6 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     await ctx.editMessageText(`✅ ${escapeHtml(p.displayName)} за столом.`, { parse_mode: "HTML", reply_markup: gameButton(gameId) });
   }));
 
-  bot.command("stack", run(async (ctx) => {
-    const game = await requireActiveGame(ctx);
-    const chips = parseChips(String(ctx.match ?? ""));
-    if (chips == null) throw new AppError(400, "Вкажіть стек числом, напр.: /stack 12500");
-    const user = await userFromCtx(ctx);
-    const p = await requireMyPlayer(ctx, game.id);
-    await G.setStack(game.id, p.id, user, chips);
-    const state = await G.loadGameState(game.id);
-    const me = state.results.find((r) => r.playerId === p.id);
-    await ctx.reply(
-      `📝 ${escapeHtml(p.displayName)}: ${fmtChips(chips)}` +
-        (me && game.type === "cash" ? ` (${me.netChips >= 0 ? "+" : ""}${fmtChips(me.netChips)}, ${fmtBuyins(me.netBuyins)})` : ""),
-      { parse_mode: "HTML" },
-    );
-  }));
-
   bot.command("rebuy", run(async (ctx) => {
     const game = await requireActiveGame(ctx);
     const arg = String(ctx.match ?? "").trim();
@@ -249,7 +259,6 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     const user = await userFromCtx(ctx);
     const p = await requireMyPlayer(ctx, game.id);
     await G.bustPlayer(game.id, p.id, user);
-    if (game.type === "cash") await ctx.reply(`👋 ${escapeHtml(p.displayName)} без фішок. /rebuy — щоб повернутися.`);
   }));
 
   bot.command("standings", run(async (ctx) => {
@@ -266,12 +275,35 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     const game = await requireActiveGame(ctx);
     const user = await userFromCtx(ctx);
     if (!G.isHost(game, user.id)) throw new AppError(403, "Завершити гру може лише хост.");
+    const live = await G.loadGameState(game.id);
+    const stillIn = live.players.filter((p) => p.status === "active").length;
+    if (game.type === "cash" || stillIn > 1) {
+      // Final stacks are needed: cash results, or ranking the players still in a tournament.
+      await ctx.reply(
+        game.type === "cash"
+          ? "Порахуйте фішки й внесіть фінальні стеки в застосунку — там же гра й завершиться."
+          : `У грі ще ${stillIn} гравців. Внесіть їхні стеки в застосунку, щоб розставити місця, або позначте вибулих через /out.`,
+        { reply_markup: gameButton(game.id, "🏁 Фінальні стеки") },
+      );
+      return;
+    }
     const state = await G.endGame(game.id, user);
     await ctx.reply(G.summaryText(state), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard().url("📊 Підсумок", `${gameWebUrl(game.id)}/summary`),
     });
     await sendCsv(ctx.chat!.id, `game-${game.id}.csv`, G.gameCsv(state), game.name);
+  }));
+
+  bot.command(["stats", "me"], run(async (ctx) => {
+    const user = await userFromCtx(ctx);
+    const chatRow = isGroup(ctx) ? (await db.select().from(chats).where(eq(chats.id, ctx.chat!.id)).limit(1))[0] : undefined;
+    const p = await loadProfile(user, `u:${user.id}`, chatRow?.publicId);
+    const path = `profile/${encodeURIComponent(p.key)}${chatRow ? `?chat=${chatRow.publicId}` : ""}`;
+    await ctx.reply(profileText(p), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().url("📈 Профіль і графіки", `${appUrl()}/${path}`),
+    });
   }));
 
   bot.command("leaderboard", run(async (ctx) => {

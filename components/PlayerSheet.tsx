@@ -1,21 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { fmtChips, fmtDateTime, fmtSigned } from "@/lib/format";
-import { haptic, confirmDialog } from "@/lib/client/telegram";
+import { fmtChips, fmtDateTime } from "@/lib/format";
+import { confirmDialog, haptic } from "@/lib/client/telegram";
 import type { GameStateDTO, PlayerDTO } from "@/lib/types";
 import type { GameActionInput } from "@/lib/server/schemas";
-import { canEdit } from "./StackTable";
-import { Button, inputCls, Sheet, Signed } from "./ui";
+import { canEdit } from "./PlayerList";
+import { Button, inputCls, Sheet } from "./ui";
 
-type ActionInput = GameActionInput;
-
-function niceStep(n: number) {
-  const nice = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
-  return nice.reduce((best, x) => (Math.abs(x - n) < Math.abs(best - n) ? x : best), nice[0]);
+export function profileHref(state: GameStateDTO, p: { userId: number | null; key?: string; displayName: string }) {
+  const key = p.key ?? (p.userId != null ? `u:${p.userId}` : `n:${p.displayName.trim().toLowerCase().replace(/\s+/g, " ")}`);
+  if (state.chat) return `/profile/${encodeURIComponent(key)}?chat=${state.chat.publicId}`;
+  return p.userId != null ? `/profile/${encodeURIComponent(key)}` : null;
 }
 
-export function StackEditor({
+/** Rebuys, elimination and seat management for one player — no stack counting during play. */
+export function PlayerSheet({
   state,
   player,
   onClose,
@@ -24,10 +25,8 @@ export function StackEditor({
   state: GameStateDTO;
   player: PlayerDTO | null;
   onClose: () => void;
-  act: (a: ActionInput, ok?: string) => Promise<boolean>;
+  act: (a: GameActionInput, ok?: string) => Promise<boolean>;
 }) {
-  const [value, setValue] = useState(0);
-  const [fresh, setFresh] = useState(true);
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
@@ -35,41 +34,22 @@ export function StackEditor({
 
   useEffect(() => {
     if (player) {
-      setValue(player.currentChips);
-      setFresh(true);
       setRenaming(false);
       setName(player.displayName);
       setCustomBuyin(null);
     }
   }, [player]);
 
-  if (!player) return <Sheet open={false} onClose={onClose}>{null}</Sheet>;
+  if (!player) return null;
 
   const { game } = state;
   const editable = canEdit(state, player);
   const host = state.role === "host" && game.status === "active";
-  const small = niceStep(game.startingStack / 20);
-  const big = niceStep(game.startingStack / 4);
-  const r = state.results.find((x) => x.playerId === player.id);
-  const delta = value - player.currentChips;
+  const tournament = game.type === "tournament";
   const playerBuyins = state.buyins.filter((b) => b.playerId === player.id);
+  const profile = profileHref(state, player);
 
-  const press = (d: string) => {
-    haptic("select");
-    setValue((v) => {
-      const base = fresh ? "" : String(v);
-      const next = d === "⌫" ? base.slice(0, -1) : (base + d).replace(/^0+(?=\d)/, "");
-      return Math.min(999_999_999, Number(next || 0));
-    });
-    setFresh(false);
-  };
-  const step = (n: number) => {
-    haptic("light");
-    setValue((v) => Math.max(0, v + n));
-    setFresh(false);
-  };
-
-  async function run(a: ActionInput, ok?: string, close = true) {
+  async function run(a: GameActionInput, ok?: string, close = true) {
     setBusy(true);
     const success = await act(a, ok);
     setBusy(false);
@@ -79,63 +59,21 @@ export function StackEditor({
 
   return (
     <Sheet open onClose={onClose} title={player.displayName}>
-      <div className="mb-3 flex items-center justify-between text-sm text-hint">
-        <span>
-          Бай-іни: {player.buyinCount} · {fmtChips(player.buyinChips)}
-        </span>
-        {r && game.type === "cash" && <Signed value={r.netChips} className="font-semibold">{fmtSigned(r.netChips)}</Signed>}
-        {game.type === "tournament" && player.status === "busted" && <span>вибув · {player.finishPlace}-е</span>}
+      <div className="mb-4 grid grid-cols-2 gap-2 text-center">
+        <div className="rounded-[22px] bg-fg/5 py-3">
+          <div className="font-display text-xl font-bold tabular">{fmtChips(player.buyinChips)}</div>
+          <div className="text-[12px] font-semibold text-hint">куплено фішок</div>
+        </div>
+        <div className="rounded-[22px] bg-fg/5 py-3">
+          <div className="font-display text-xl font-bold tabular">{player.buyinCount}</div>
+          <div className="text-[12px] font-semibold text-hint">бай-інів</div>
+        </div>
       </div>
 
-      {editable ? (
+      {editable && (
         <>
-          <div className="mb-3 rounded-[26px] bg-fg/5 px-4 py-3.5 text-center ring-1 ring-inset ring-fg/5">
-            <div className={`font-display text-[2.6rem] font-bold leading-tight tabular ${fresh ? "text-fg" : "text-link"}`}>{fmtChips(value)}</div>
-            <div className="h-5 text-sm">
-              {delta !== 0 && <Signed value={delta}>{fmtSigned(delta)} від поточного</Signed>}
-            </div>
-          </div>
-
-          <div className="mb-2 grid grid-cols-4 gap-2">
-            {[-big, -small, small, big].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => step(n)}
-                className={`h-11 rounded-full text-sm font-bold tabular transition active:scale-95 ${n < 0 ? "bg-neg/12 text-neg" : "bg-pos/14 text-pos"}`}
-              >
-                {n > 0 ? "+" : "−"}
-                {fmtChips(Math.abs(n))}
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-3 grid grid-cols-3 gap-2">
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "00", "0", "⌫"].map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => press(d)}
-                className="glass h-14 rounded-[22px] font-display text-xl font-semibold transition active:scale-95"
-              >
-                {d}
-              </button>
-            ))}
-          </div>
-
-          <Button
-            size="lg"
-            className="mb-3 w-full"
-            loading={busy}
-            disabled={value === player.currentChips}
-            onClick={() => run({ action: "setStack", playerId: player.id, chips: value }, "Стек оновлено")}
-          >
-            Зберегти стек
-          </Button>
-
           <div className="mb-3 grid grid-cols-2 gap-2">
             <Button
-              variant="secondary"
               disabled={busy}
               onClick={() => run({ action: "buyin", playerId: player.id, kind: "rebuy" }, `Ребай +${fmtChips(game.startingStack)}`)}
             >
@@ -172,33 +110,33 @@ export function StackEditor({
             </div>
           )}
 
-          {player.status === "active" ? (
-            <Button
-              variant="danger"
-              className="mb-3 w-full"
-              disabled={busy}
-              onClick={async () => {
-                if (await confirmDialog(`${player.displayName} вибуває?`)) {
-                  haptic("heavy");
-                  await run({ action: "bust", playerId: player.id }, game.type === "tournament" ? "Гравець вибув" : "Стек обнулено");
-                }
-              }}
-            >
-              💥 {game.type === "tournament" ? "Вибув" : "Без фішок"}
-            </Button>
-          ) : host ? (
-            <Button variant="secondary" className="mb-3 w-full" onClick={() => run({ action: "unbust", playerId: player.id }, "Гравця повернуто")}>
-              ↩︎ Повернути в гру (без ребаю)
-            </Button>
-          ) : null}
+          {tournament &&
+            (player.status === "active" ? (
+              <Button
+                variant="danger"
+                className="mb-3 w-full"
+                disabled={busy}
+                onClick={async () => {
+                  if (await confirmDialog(`${player.displayName} вибуває?`)) {
+                    haptic("heavy");
+                    await run({ action: "bust", playerId: player.id }, "Гравець вибув");
+                  }
+                }}
+              >
+                💥 Вибув
+              </Button>
+            ) : host ? (
+              <Button variant="secondary" className="mb-3 w-full" onClick={() => run({ action: "unbust", playerId: player.id }, "Гравця повернуто")}>
+                ↩︎ Повернути в гру (без ребаю)
+              </Button>
+            ) : null)}
         </>
-      ) : (
-        <div className="mb-4 rounded-[26px] bg-fg/5 px-4 py-4 text-center">
-          <div className="font-display text-4xl font-bold tabular">{fmtChips(player.currentChips)}</div>
-          <div className="mt-1 text-sm text-hint">
-            {state.viewer ? "Змінювати цей стек може лише сам гравець або хост." : "Увійдіть, щоб оновлювати свій стек."}
-          </div>
-        </div>
+      )}
+
+      {game.status === "active" && (
+        <p className="mb-3 px-1 text-[12px] text-hint">
+          Стеки під час гри не рахуємо — хост внесе фінальні фішки, коли завершуватиме гру.
+        </p>
       )}
 
       {playerBuyins.length > 0 && (
@@ -218,7 +156,7 @@ export function StackEditor({
                       aria-label="Скасувати бай-ін"
                       className="text-danger"
                       onClick={async () => {
-                        if (await confirmDialog("Скасувати цей бай-ін? Стек зменшиться на цю суму.")) {
+                        if (await confirmDialog("Скасувати цей бай-ін?")) {
                           await run({ action: "deleteBuyin", buyinId: b.id }, "Бай-ін скасовано", false);
                         }
                       }}
@@ -233,6 +171,12 @@ export function StackEditor({
         </div>
       )}
 
+      {profile && (
+        <Link href={profile} className="glass mb-3 flex h-11 items-center justify-center rounded-full text-[15px] font-bold text-link">
+          📈 Профіль і статистика
+        </Link>
+      )}
+
       {editable && (
         <div className="mb-2">
           {renaming ? (
@@ -243,7 +187,7 @@ export function StackEditor({
               </Button>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-sm">
               <button type="button" className="text-link" onClick={() => setRenaming(true)}>
                 Перейменувати
               </button>

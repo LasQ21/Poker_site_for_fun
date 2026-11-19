@@ -112,26 +112,43 @@ d("bot (integration)", () => {
     const ivan = await G.playerForUser(game.id, IVAN.id);
     await G.removePlayer(game.id, ivan!.id, hostUser);
 
-    await bot.handleUpdate(msg(ANNA, "/stack 5000"));
+    await bot.handleUpdate(msg(ANNA, "/rebuy"));
     expect(lastText()).toContain("/join");
 
     await bot.handleUpdate(msg(ANNA, "/join"));
     expect(lastText()).toContain("за столом");
 
-    await bot.handleUpdate(msg(ANNA, "/stack 12,5k"));
-    expect(lastText()).toContain("12");
+    // No stack counting during play: /stack is gone, rebuys are tracked.
+    await bot.handleUpdate(msg(ANNA, "/rebuy 5000"));
+    expect(lastText()).toContain("ребай 5");
 
-    await bot.handleUpdate(msg(HOST, "/stack 7500"));
     await bot.handleUpdate(msg(ANNA, "/endgame"));
     expect(lastText()).toContain("лише хост");
 
     await bot.handleUpdate(msg(HOST, "/standings"));
-    expect(lastText()).toMatch(/1\. Анна — 12\s500/);
+    expect(lastText()).toContain("Анна — у грі · 2 БІ");
+
+    // Two players still in: the host is sent to the app to enter final stacks.
+    await bot.handleUpdate(msg(HOST, "/endgame"));
+    expect(lastText()).toContain("Внесіть їхні стеки");
 
     await bot.handleUpdate(msg(HOST, "/out"));
+    await bot.handleUpdate(msg(HOST, "/standings"));
+    expect(lastText()).toContain("2. <s>Хост</s>");
     await bot.handleUpdate(msg(HOST, "/endgame"));
     expect(lastText()).toContain("завершено");
     expect(lastText()).toMatch(/🥇 Анна — 4 очк/);
+
+    await bot.handleUpdate(msg(ANNA, "/stats"));
+    expect(lastText()).toContain("Анна");
+    expect(lastText()).toContain("1 🥇");
+    expect(lastText()).toContain("4 очк.");
+
+    const profile = await import("@/lib/server/profile");
+    const [anna] = await db.select().from(users).where(eq(users.id, ANNA.id));
+    const p = await profile.loadProfile(anna, `u:${HOST.id}`);
+    expect(p.stats.tournament).toMatchObject({ games: 1, points: 1, bestPlace: 2 });
+    await expect(profile.loadProfile(null, `u:${HOST.id}`)).rejects.toThrow();
 
     await bot.handleUpdate(msg(HOST, "/leaderboard"));
     expect(lastText()).toContain("Анна — 4 очк.");

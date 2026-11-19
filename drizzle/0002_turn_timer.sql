@@ -1,0 +1,1 @@
+ALTER TABLE "games" ADD COLUMN "turn_seconds" integer DEFAULT 30 NOT NULL;

@@ -31,7 +31,7 @@ export default function HomePage() {
           {me?.user ? `${me.user.firstName}, сідаємо?` : "Покер з друзями, без грошей"}
         </h1>
         <p className="mt-2 max-w-[17rem] text-[15px] font-medium text-hint">
-          Стеки, ребаї й таймер блайндів — одна таблиця на весь стіл.
+          Бай-іни, таймер блайндів і ходу, а після гри — статистика й графіки кожного.
         </p>
         {me?.user && (
           <LinkButton href="/new" variant="primary" className="mt-5 w-full">

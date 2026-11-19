@@ -27,6 +27,17 @@ export function useTimer(game: GameDTO, clockOffsetMs: number): TimerView {
     return () => clearInterval(id);
   }, [game.blindLevel, game.levelStartedAt, game.pausedRemainingMs, game.blindStructure, clockOffsetMs]);
 
+  // A short heads-up one minute before the blinds go up.
+  const warned = useRef<number | null>(null);
+  useEffect(() => {
+    if (view.status !== "running" || !view.nextLevel || view.level.isBreak) return;
+    if (view.remainingMs <= 60_000 && view.remainingMs > 58_000 && warned.current !== view.levelIndex) {
+      warned.current = view.levelIndex;
+      tone([660], 0.18);
+      haptic("light");
+    }
+  }, [view]);
+
   // Sound + haptics when the level changes while the timer runs.
   const prevLevel = useRef(view.levelIndex);
   useEffect(() => {
@@ -42,24 +53,31 @@ export function useTimer(game: GameDTO, clockOffsetMs: number): TimerView {
 
 let ctx: AudioContext | null = null;
 
-export function beep() {
+/** Plays a sequence of short beeps (one per frequency, `gap` seconds apart). */
+export function tone(freqs: number[], gap = 0.25, length = 0.2, volume = 0.25) {
   try {
     ctx ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     const now = ctx.currentTime;
-    [0, 0.25, 0.5].forEach((offset, i) => {
+    freqs.forEach((freq, i) => {
+      const offset = i * gap;
       const osc = ctx!.createOscillator();
       const gain = ctx!.createGain();
-      osc.frequency.value = i === 2 ? 1320 : 880;
+      osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, now + offset);
-      gain.gain.exponentialRampToValueAtTime(0.25, now + offset + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.2);
+      gain.gain.exponentialRampToValueAtTime(volume, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + length);
       osc.connect(gain).connect(ctx!.destination);
       osc.start(now + offset);
-      osc.stop(now + offset + 0.22);
+      osc.stop(now + offset + length + 0.02);
     });
   } catch {
     /* audio not available */
   }
+}
+
+/** Blind level change. */
+export function beep() {
+  tone([880, 880, 1320]);
 }
 
 /** Browsers only allow audio after a user gesture; call from a click handler to unlock it. */

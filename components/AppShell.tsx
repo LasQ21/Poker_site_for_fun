@@ -7,7 +7,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/client/api";
 import { getWebApp } from "@/lib/client/telegram";
 import type { MeDTO } from "@/lib/types";
-import { IconCards, IconHistory, IconTrophy } from "./icons";
+import { IconCards, IconHistory, IconTrophy, IconUser } from "./icons";
 import { Toast } from "./ui";
 
 const ToastCtx = createContext<(msg: string) => void>(() => {});
@@ -21,6 +21,7 @@ const TABS = [
   { href: "/", label: "Ігри", Icon: IconCards, match: (p: string) => p === "/" },
   { href: "/leaderboard", label: "Рейтинг", Icon: IconTrophy, match: (p: string) => p.startsWith("/leaderboard") },
   { href: "/history", label: "Історія", Icon: IconHistory, match: (p: string) => p.startsWith("/history") },
+  { href: "/profile", label: "Профіль", Icon: IconUser, match: (p: string) => p === "/profile" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

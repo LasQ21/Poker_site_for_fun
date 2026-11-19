@@ -28,9 +28,6 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
     case "removePlayer":
       await G.removePlayer(id, a.playerId, viewer);
       break;
-    case "setStack":
-      await G.setStack(id, a.playerId, viewer, a.chips);
-      break;
     case "buyin":
       result = await G.addBuyin(id, a.playerId, viewer, a.kind, a.chips);
       break;

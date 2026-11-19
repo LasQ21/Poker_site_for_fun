@@ -1,16 +1,15 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback } from "react";
 import { useGame } from "@/lib/client/useGame";
 import { openExternal, useBackButton } from "@/lib/client/telegram";
 import { fmtBuyins, fmtChips, fmtDateTime, fmtSigned } from "@/lib/format";
-import { playerColor } from "@/components/StackTable";
+import { HBars } from "@/components/HBars";
+import { playerColor } from "@/components/PlayerList";
+import { profileHref } from "@/components/PlayerSheet";
 import { Badge, Button, Empty, PageLoader, Section, Signed } from "@/components/ui";
-
-const StackChart = dynamic(() => import("@/components/StackChart"), { ssr: false, loading: () => <div className="h-[260px]" /> });
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export default function SummaryPage() {
@@ -55,8 +54,10 @@ export default function SummaryPage() {
       </div>
 
       <Section title="Результати">
-        {results.map((r) => (
-          <div key={r.playerId} className="flex items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0">
+        {results.map((r) => {
+          const href = profileHref(state, r);
+          return (
+          <RowLink key={r.playerId} href={href}>
             <span className="w-7 text-center text-lg">{MEDALS[r.place - 1] ?? <span className="text-sm text-hint">{r.place}</span>}</span>
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: playerColor(state, r.playerId) }} />
             <span className="min-w-0 flex-1">
@@ -78,16 +79,28 @@ export default function SummaryPage() {
                 </>
               )}
             </span>
-          </div>
-        ))}
+          </RowLink>
+          );
+        })}
       </Section>
       {cash && state.check.diff !== 0 && (
         <p className="-mt-2 mb-4 px-4 text-[13px] text-neg">⚠️ Фішки не сходяться: {fmtSigned(state.check.diff)}</p>
       )}
 
-      <Section title="Стеки в часі">
-        <StackChart state={state} />
-      </Section>
+      {results.length > 1 && (
+        <Section title={cash ? "Хто скільки виграв (фішки)" : "Очки за турнір"}>
+          <HBars
+            diverging={cash}
+            items={results.map((r) => ({
+              key: String(r.playerId),
+              label: r.displayName,
+              value: cash ? r.netChips : (r.points ?? 0),
+              display: cash ? fmtSigned(r.netChips) : `${r.points} очк.`,
+              href: profileHref(state, r),
+            }))}
+          />
+        </Section>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <Button variant="secondary" onClick={() => openExternal(`${window.location.origin}/api/games/${game.id}/export.csv`)}>
@@ -103,6 +116,17 @@ export default function SummaryPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function RowLink({ href, children }: { href: string | null; children: React.ReactNode }) {
+  const cls = "flex items-center gap-3 border-b border-sep px-4 py-3 transition-colors last:border-b-0";
+  return href ? (
+    <Link href={href} className={`${cls} active:bg-fg/5`}>
+      {children}
+    </Link>
+  ) : (
+    <div className={cls}>{children}</div>
   );
 }
 

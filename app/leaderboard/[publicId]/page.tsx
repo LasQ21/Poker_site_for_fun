@@ -84,7 +84,11 @@ export default function LeaderboardPage() {
       <Section>
         {rows.length ? (
           rows.map((r, i) => (
-            <div key={r.key} className="flex items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0">
+            <Link
+              key={r.key}
+              href={`/profile/${encodeURIComponent(r.key)}?chat=${publicId}`}
+              className="flex items-center gap-3 border-b border-sep px-4 py-3 transition-colors last:border-b-0 active:bg-fg/5"
+            >
               {i < 3 ? (
                 <span className="chip grid h-9 w-9 shrink-0 place-items-center font-display text-xs font-bold text-white" style={{ ["--chip" as string]: ["#d79a1e", "#8e9aa6", "#b06a3b"][i] }}>
                   <span className="relative z-10">{i + 1}</span>
@@ -97,11 +101,7 @@ export default function LeaderboardPage() {
                 <span className="block text-[12px] text-hint">
                   {r.games} ігор · {r.wins} перемог ·{" "}
                   {currentTab === "tournament" ? `сер. місце ${r.avgPlace}` : `сер. ${fmtBuyins(r.avgResult)}`}
-                  {r.bestGame && (
-                    <>
-                      {" "}· найкраща: <Link className="text-link" href={`/g/${r.bestGame.gameId}/summary`}>{r.bestGame.gameName}</Link>
-                    </>
-                  )}
+
                 </span>
               </span>
               <span className="text-right">
@@ -114,7 +114,7 @@ export default function LeaderboardPage() {
                   </>
                 )}
               </span>
-            </div>
+            </Link>
           ))
         ) : (
           <Empty icon="📭" title="Ще немає результатів">Завершені ігри групи з’являться тут.</Empty>

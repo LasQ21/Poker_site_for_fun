@@ -16,7 +16,7 @@ export const createGameSchema = z.object({
   startingStack: z.number().int().min(1).max(100_000_000),
   blindTemplate: z.enum(["turbo", "regular", "deep", "cash"]).optional(),
   blindStructure: z.array(blindLevelSchema).max(100).optional(),
-  reminderIntervalMin: z.number().int().min(0).max(240).nullable().optional(),
+  turnSeconds: z.number().int().min(0).max(600).optional(),
   chatId: z.number().int().nullable().optional(),
   hostPlays: z.boolean().optional(),
   playerNames: z.array(z.string().max(40)).max(30).optional(),
@@ -24,7 +24,7 @@ export const createGameSchema = z.object({
 
 export const updateGameSchema = z.object({
   name: z.string().max(80).optional(),
-  reminderIntervalMin: z.number().int().min(0).max(240).nullable().optional(),
+  turnSeconds: z.number().int().min(0).max(600).optional(),
   blindStructure: z.array(blindLevelSchema).min(1).max(100).optional(),
   startingStack: z.number().int().min(1).max(100_000_000).optional(),
 });
@@ -42,7 +42,6 @@ export const actionSchema = z.discriminatedUnion("action", [
     status: z.enum(["active", "left"]).optional(),
   }),
   z.object({ action: z.literal("removePlayer"), playerId: pid }),
-  z.object({ action: z.literal("setStack"), playerId: pid, chips }),
   z.object({
     action: z.literal("buyin"),
     playerId: pid,

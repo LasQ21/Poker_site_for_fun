@@ -15,7 +15,7 @@ export interface GameDTO {
   blindLevel: number;
   levelStartedAt: string | null;
   pausedRemainingMs: number | null;
-  reminderIntervalMin: number | null;
+  turnSeconds: number;
   joinCode: string | null;
   createdAt: string;
   finishedAt: string | null;
@@ -80,3 +80,5 @@ export interface LeaderboardDTO {
   cash: LeaderboardRow[];
   recent: { id: string; name: string; type: string; finishedAt: string | null; winner: string | null }[];
 }
+
+export type { ProfileData as ProfileDTO } from "@/lib/server/profile";

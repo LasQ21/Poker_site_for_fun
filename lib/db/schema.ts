@@ -87,6 +87,9 @@ export const games = pgTable(
     levelStartedAt: ts("level_started_at"),
     pausedRemainingMs: integer("paused_remaining_ms"),
     timerVersion: integer("timer_version").notNull().default(0),
+    /** Seconds per move for the turn clock (0 = off). */
+    turnSeconds: integer("turn_seconds").notNull().default(30),
+    /** Legacy: "update your stack" reminders (no longer scheduled). */
     reminderIntervalMin: integer("reminder_interval_min"),
     reminderVersion: integer("reminder_version").notNull().default(0),
     /** 4-digit code to join the game; unique among active games, freed when the game ends. */

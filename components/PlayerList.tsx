@@ -56,7 +56,12 @@ export function PlayerList({ state, onSelect }: { state: GameStateDTO; onSelect:
               <span className="flex items-center gap-1.5">
                 <span className={`truncate font-bold ${out ? "line-through" : ""}`}>{p.displayName}</span>
                 {mine && <Badge tone="accent">ви</Badge>}
-                {p.userId == null && <span title="Без Telegram" className="text-[11px] text-hint">○</span>}
+                {p.userId == null && !p.linkUsername && <span title="Без Telegram" className="text-[11px] text-hint">○</span>}
+                {p.userId == null && p.linkUsername && (
+                  <span title="Прив'яжеться, коли гравець відкриє бота" className="truncate text-[11px] font-semibold text-hint">
+                    @{p.linkUsername}
+                  </span>
+                )}
                 {p.userId === game.hostUserId && <span title="Хост" className="text-[12px]">👑</span>}
               </span>
               <span className="mt-0.5 block text-[12px] font-medium text-hint">

@@ -32,6 +32,7 @@ export interface PlayerDTO {
   buyinChips: number;
   buyinCount: number;
   lastUpdateAt: string | null;
+  linkUsername: string | null;
 }
 
 export interface GameStateDTO {

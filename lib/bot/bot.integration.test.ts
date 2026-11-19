@@ -205,4 +205,40 @@ d("bot (integration)", () => {
     await db.delete(games).where(eq(games.chatId, FORUM.id));
     await db.delete(chats).where(eq(chats.id, FORUM.id));
   });
+
+  it("hands name-only seats to the linked Telegram user on first visit", async () => {
+    const BODYA = { id: 9010, is_bot: false, first_name: "Богдан", username: "Q4R8T7" };
+    const KOSTYA = { id: 9011, is_bot: false, first_name: "Костянтин", username: "obrkos" };
+    const { db } = await import("@/lib/db");
+    const { games, players, users, playerLinks } = await import("@/lib/db/schema");
+    const { eq, inArray } = await import("drizzle-orm");
+    const G = await import("@/lib/server/games");
+    await db.delete(users).where(inArray(users.id, [BODYA.id, KOSTYA.id]));
+    // Seed links from the migration (re-created here in case the table was cleaned).
+    if (!(await db.select().from(playerLinks).where(eq(playerLinks.username, "q4r8t7"))).length) {
+      await db.insert(playerLinks).values([{ username: "q4r8t7", nameKey: "бодя" }, { username: "obrkos", nameKey: "костя" }]);
+    }
+    const [host] = await db.select().from(users).where(eq(users.id, HOST.id));
+    const game = await G.createGame(host, { type: "cash", startingStack: 10_000, playerNames: ["Бодя", "Даня"] });
+    const seats = await db.select().from(players).where(eq(players.gameId, game.id));
+    expect(seats.find((p) => p.displayName === "Бодя")?.userId).toBeNull();
+    const state = await G.loadGameState(game.id);
+    expect(state.players.find((p) => p.displayName === "Бодя")?.linkUsername).toBe("q4r8t7");
+
+    // Bodya opens the bot for the first time → the seat is his.
+    await bot.handleUpdate(msg(BODYA, "/start", { id: BODYA.id, type: "private" }));
+    expect((await G.playerForUser(game.id, BODYA.id))?.displayName).toBe("Бодя");
+
+    // A known user is seated as himself when the host adds his name.
+    await bot.handleUpdate(msg(KOSTYA, "/start", { id: KOSTYA.id, type: "private" }));
+    const added = await G.addPlayer(game.id, host, "Костя");
+    expect(added.userId).toBe(KOSTYA.id);
+
+    // The host links a new name by username.
+    const res = await G.linkPlayerUsername(game.id, seats.find((p) => p.displayName === "Даня")!.id, host, "t.me/spchless_test");
+    expect(res).toEqual({ username: "spchless_test", claimed: 0 });
+    await db.delete(games).where(eq(games.id, game.id));
+    await db.delete(playerLinks).where(eq(playerLinks.username, "spchless_test"));
+    await db.delete(users).where(inArray(users.id, [BODYA.id, KOSTYA.id]));
+  });
 });

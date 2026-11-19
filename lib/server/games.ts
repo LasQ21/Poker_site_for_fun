@@ -31,6 +31,7 @@ import { scheduleJob } from "@/lib/qstash";
 import { escapeHtml, notifyChat, urlButton, type ChatTarget } from "@/lib/telegram/api";
 import { AppError, badRequest, forbidden, notFound } from "./errors";
 import { displayNameOf } from "./users";
+import { addPlayerLink, claimSeatsForUser, pendingLinks } from "./links";
 
 export type BuyinKind = "buyin" | "rebuy" | "addon";
 
@@ -39,6 +40,8 @@ export interface PlayerView extends Player {
   buyinChips: number;
   buyinCount: number;
   lastUpdateAt: string | null;
+  /** Telegram username this name-only seat goes to when that person opens the bot. */
+  linkUsername?: string | null;
 }
 
 export interface GameState {
@@ -183,7 +186,14 @@ export async function loadGameState(gameId: string): Promise<GameState> {
     : undefined;
   const plist = await db.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.id));
   const agg = await playerAggregates([gameId]);
-  const pviews = plist.map((p) => toPlayerView(p, agg));
+  const links = await pendingLinks(
+    game.hostUserId,
+    plist.filter((p) => p.userId == null).map((p) => p.displayName),
+  );
+  const pviews = plist.map((p) => ({
+    ...toPlayerView(p, agg),
+    linkUsername: p.userId == null ? (links.get(p.displayName.trim().toLowerCase().replace(/\s+/g, " ")) ?? null) : null,
+  }));
   const blist = await db
     .select({ id: buyins.id, playerId: buyins.playerId, chips: buyins.chips, kind: buyins.kind, createdAt: buyins.createdAt })
     .from(buyins)
@@ -345,7 +355,30 @@ async function insertPlayer(game: Game, displayName: string, userId: number | nu
     .returning();
   await db.insert(buyins).values({ gameId: game.id, playerId: p.id, chips: game.startingStack, kind: "buyin", createdBy: actorId });
   await db.insert(stackSnapshots).values({ gameId: game.id, playerId: p.id, chips: game.startingStack, recordedBy: actorId });
+  if (userId == null) {
+    // A known name (linked to a Telegram username) is seated as that user right away.
+    const username = (await pendingLinks(game.hostUserId, [p.displayName])).values().next().value;
+    if (username) {
+      const [u] = await db.select().from(users).where(sql`lower(${users.username}) = ${username}`).limit(1);
+      if (u && (await claimSeatsForUser(u))) {
+        const [fresh] = await db.select().from(players).where(eq(players.id, p.id)).limit(1);
+        return fresh ?? p;
+      }
+    }
+  }
   return p;
+}
+
+/** Host: "this name is @username" — the seat (and the same name in the host's other games) goes to that user. */
+export async function linkPlayerUsername(gameId: string, playerId: number, actor: User, username: string) {
+  const game = await getGame(gameId);
+  assertHost(game, actor);
+  const player = await getPlayer(gameId, playerId);
+  if (player.userId != null) throw badRequest("Гравець уже прив'язаний до Telegram");
+  const res = await addPlayerLink(actor.id, player.displayName, username);
+  if (!res) throw badRequest("Вкажіть Telegram username, напр. @nickname");
+  await touchGame(gameId);
+  return res;
 }
 
 export async function addPlayer(gameId: string, actor: User, displayName: string) {

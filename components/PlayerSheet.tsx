@@ -31,12 +31,14 @@ export function PlayerSheet({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [customBuyin, setCustomBuyin] = useState<string | null>(null);
+  const [tg, setTg] = useState<string | null>(null);
 
   useEffect(() => {
     if (player) {
       setRenaming(false);
       setName(player.displayName);
       setCustomBuyin(null);
+      setTg(null);
     }
   }, [player]);
 
@@ -168,6 +170,49 @@ export function PlayerSheet({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {player.userId == null && (player.linkUsername || state.role === "host") && (
+        <div className="mb-3 rounded-[22px] bg-fg/5 px-3.5 py-3">
+          <div className="text-[13px] font-bold">Telegram</div>
+          {tg == null ? (
+            <div className="flex items-center justify-between gap-3 text-[13px] text-hint">
+              <span>
+                {player.linkUsername ? (
+                  <>
+                    <b className="text-fg">@{player.linkUsername}</b> — місце й історія перейдуть до нього, щойно він відкриє бота
+                  </>
+                ) : (
+                  "Не прив'язано. Вкажіть @username — гравець отримає це місце й свою статистику, коли відкриє бота."
+                )}
+              </span>
+              {state.role === "host" && (
+                <button type="button" className="shrink-0 font-bold text-link" onClick={() => setTg(player.linkUsername ? `@${player.linkUsername}` : "@")}>
+                  {player.linkUsername ? "Змінити" : "Вказати"}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1.5 flex gap-2">
+              <input
+                className={inputCls}
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect="off"
+                placeholder="@username або t.me/username"
+                value={tg}
+                onChange={(e) => setTg(e.target.value)}
+              />
+              <Button
+                variant="secondary"
+                disabled={busy || tg.replace("@", "").trim().length < 4}
+                onClick={() => run({ action: "linkUsername", playerId: player.id, username: tg }, "Прив'язку збережено", false).then((ok) => ok && setTg(null))}
+              >
+                OK
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

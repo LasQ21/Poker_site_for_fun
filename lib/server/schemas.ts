@@ -42,6 +42,7 @@ export const actionSchema = z.discriminatedUnion("action", [
     status: z.enum(["active", "left"]).optional(),
   }),
   z.object({ action: z.literal("removePlayer"), playerId: pid }),
+  z.object({ action: z.literal("linkUsername"), playerId: pid, username: z.string().min(1).max(80) }),
   z.object({
     action: z.literal("buyin"),
     playerId: pid,

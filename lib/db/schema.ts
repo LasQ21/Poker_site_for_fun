@@ -171,7 +171,27 @@ export const stackSnapshots = pgTable(
   (t) => [index("snapshots_game_idx").on(t.gameId, t.recordedAt)],
 );
 
+/**
+ * "This player name is that Telegram user": seats added by name (without Telegram) are handed to the
+ * user with `username` as soon as they open the bot or the app. `createdBy` null = applies to every game,
+ * otherwise only to games hosted by that user.
+ */
+export const playerLinks = pgTable(
+  "player_links",
+  {
+    id: serial("id").primaryKey(),
+    /** Telegram username, lowercase, without "@". */
+    username: text("username").notNull(),
+    /** Player name normalised like leaderboard keys (trimmed, lowercase, single spaces). */
+    nameKey: text("name_key").notNull(),
+    createdBy: tgId("created_by").references(() => users.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("player_links_username_idx").on(t.username), index("player_links_name_idx").on(t.nameKey)],
+);
+
 export type User = typeof users.$inferSelect;
+export type PlayerLink = typeof playerLinks.$inferSelect;
 export type Chat = typeof chats.$inferSelect;
 export type Season = typeof seasons.$inferSelect;
 export type Game = typeof games.$inferSelect;

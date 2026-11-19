@@ -25,6 +25,9 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
     case "updatePlayer":
       await G.updatePlayer(id, a.playerId, viewer, a);
       break;
+    case "linkUsername":
+      result = await G.linkPlayerUsername(id, a.playerId, viewer, a.username);
+      break;
     case "removePlayer":
       await G.removePlayer(id, a.playerId, viewer);
       break;

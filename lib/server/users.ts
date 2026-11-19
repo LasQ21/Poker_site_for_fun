@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chatMembers, chats, games, users, type User } from "@/lib/db/schema";
 import type { TelegramUser } from "@/lib/auth/telegram";
+import { claimSeatsForUser } from "./links";
 import { nanoid } from "nanoid";
 
 export async function upsertUser(u: TelegramUser): Promise<User> {
@@ -25,6 +26,12 @@ export async function upsertUser(u: TelegramUser): Promise<User> {
       },
     })
     .returning();
+  // First visit of a known player (e.g. "Бодя" = @q4r8t7): their name-only seats become theirs.
+  try {
+    await claimSeatsForUser(row);
+  } catch (e) {
+    console.error("[links] claim failed", e);
+  }
   return row;
 }
 

@@ -160,6 +160,15 @@ d("bot (integration)", () => {
 
     await bot.handleUpdate(msg(HOST, "/history"));
     expect(lastText()).toContain("Останні ігри");
+
+    // In a private chat /leaderboard covers all of the user's games (seasons don't reset it).
+    await bot.handleUpdate(msg(ANNA, "/leaderboard", { id: ANNA.id, type: "private" }));
+    expect(lastText()).toContain("усі ваші ігри");
+    expect(lastText()).toContain("1. Анна — 4 очк.");
+    const { loadCircleLeaderboard } = await import("@/lib/server/leaderboard");
+    const circle = await loadCircleLeaderboard(ANNA.id);
+    expect(circle.chat).toBeNull();
+    expect(circle.tournament.map((r) => r.key)).toEqual([`u:${ANNA.id}`, `u:${HOST.id}`]);
   });
 
   it("remembers the poker topic of a forum group", async () => {

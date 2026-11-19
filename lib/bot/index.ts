@@ -8,7 +8,7 @@ import { fmtBuyins, fmtChips, fmtDate, fmtSigned } from "@/lib/format";
 import { parseChips } from "@/lib/game/parse";
 import { AppError } from "@/lib/server/errors";
 import * as G from "@/lib/server/games";
-import { activeSeason, endSeason, loadLeaderboard, startSeason } from "@/lib/server/leaderboard";
+import { activeSeason, endSeason, loadCircleLeaderboard, loadLeaderboard, startSeason } from "@/lib/server/leaderboard";
 import { loadProfile, type ProfileData } from "@/lib/server/profile";
 import { setChatTopic, touchMember, upsertChat, upsertUser } from "@/lib/server/users";
 import { escapeHtml, sendCsv } from "@/lib/telegram/api";
@@ -26,6 +26,7 @@ export const PRIVATE_COMMANDS: BotCommand[] = [
   { command: "join", description: "Приєднатися за кодом: /join 1234" },
   { command: "newgame", description: "Створити гру" },
   { command: "stats", description: "Моя статистика" },
+  { command: "leaderboard", description: "Лідерборд усіх моїх ігор" },
   { command: "history", description: "Мої останні ігри" },
   { command: "help", description: "Довідка" },
 ];
@@ -345,9 +346,9 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
   }));
 
   bot.command("leaderboard", run(async (ctx) => {
-    if (!isGroup(ctx)) throw new AppError(400, "Лідерборд ведеться в групі — напишіть /leaderboard там.");
-    const lb = await loadLeaderboard(ctx.chat!.id, "current");
-    const title = lb.season ? `сезон «${escapeHtml(lb.season.name)}»` : "за весь час";
+    const group = isGroup(ctx);
+    const lb = group ? await loadLeaderboard(ctx.chat!.id, "current") : await loadCircleLeaderboard((await userFromCtx(ctx)).id);
+    const title = !group ? "усі ваші ігри" : lb.season ? `сезон «${escapeHtml(lb.season.name)}»` : "за весь час";
     const parts: string[] = [`🏆 <b>Лідерборд</b> — ${title}`];
     if (lb.tournament.length) {
       parts.push(
@@ -370,7 +371,9 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     if (!lb.tournament.length && !lb.cash.length) parts.push("\nЩе немає завершених ігор.");
     await ctx.reply(parts.join("\n"), {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().url("📈 Детально", miniAppLink(`lb_${lb.chat.publicId}`)),
+      reply_markup: lb.chat
+        ? new InlineKeyboard().url("📈 Детально", miniAppLink(`lb_${lb.chat.publicId}`))
+        : new InlineKeyboard().webApp("📈 Детально", `${appUrl()}/leaderboard`),
     });
   }));
 

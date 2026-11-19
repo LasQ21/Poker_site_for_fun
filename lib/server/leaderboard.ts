@@ -1,17 +1,21 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { chatMembers, chats, games, players, seasons, type Chat, type Season } from "@/lib/db/schema";
+import { chatMembers, chats, games, players, seasons, users, type Chat, type Game, type Season } from "@/lib/db/schema";
 import { computeLeaderboard, computeResults, type LeaderboardGame, type LeaderboardRow } from "@/lib/game/results";
 import { badRequest, forbidden, notFound } from "./errors";
 import { playerAggregates, toPlayerView } from "./games";
 
+/** Leaderboard row with the player's Telegram identity (for linked players). */
+export type LeaderboardEntry = LeaderboardRow & { username: string | null; photoUrl: string | null };
+
 export interface LeaderboardData {
-  chat: { title: string; publicId: string };
+  /** null = the viewer's circle: every game they played, hosted or that belongs to their groups. */
+  chat: { title: string; publicId: string } | null;
   seasons: { id: number; name: string; isActive: boolean; startsAt: Date; endsAt: Date | null }[];
   season: { id: number; name: string } | null;
   gamesCount: { cash: number; tournament: number };
-  tournament: LeaderboardRow[];
-  cash: LeaderboardRow[];
+  tournament: LeaderboardEntry[];
+  cash: LeaderboardEntry[];
   recent: { id: string; name: string; type: string; finishedAt: Date | null; winner: string | null }[];
 }
 
@@ -47,6 +51,32 @@ export async function loadLeaderboard(chatId: number, seasonId: number | "curren
       and(eq(games.chatId, chatId), eq(games.status, "finished"), season ? eq(games.seasonId, season.id) : undefined),
     )
     .orderBy(desc(games.finishedAt));
+  return {
+    chat: { title: chat.title, publicId: chat.publicId },
+    seasons: allSeasons.map((s) => ({ id: s.id, name: s.name, isActive: s.isActive, startsAt: s.startsAt, endsAt: s.endsAt })),
+    season: season ? { id: season.id, name: season.name } : null,
+    ...(await buildBoard(glist)),
+  };
+}
+
+/** Leaderboard of everyone the user plays with: their games, games they hosted and their groups' games. */
+export async function loadCircleLeaderboard(userId: number): Promise<LeaderboardData> {
+  const memberChats = db.select({ id: chatMembers.chatId }).from(chatMembers).where(eq(chatMembers.userId, userId));
+  const played = db.select({ id: players.gameId }).from(players).where(eq(players.userId, userId));
+  const glist = await db
+    .select()
+    .from(games)
+    .where(
+      and(
+        eq(games.status, "finished"),
+        or(eq(games.hostUserId, userId), inArray(games.id, played), inArray(games.chatId, memberChats)),
+      ),
+    )
+    .orderBy(desc(games.finishedAt));
+  return { chat: null, seasons: [], season: null, ...(await buildBoard(glist)) };
+}
+
+async function buildBoard(glist: Game[]) {
   const ids = glist.map((g) => g.id);
   const plist = ids.length ? await db.select().from(players).where(inArray(players.gameId, ids)) : [];
   const agg = await playerAggregates(ids);
@@ -60,17 +90,24 @@ export async function loadLeaderboard(chatId: number, seasonId: number | "curren
       plist.filter((p) => p.gameId === g.id).map((p) => toPlayerView(p, agg)),
     ),
   }));
-
+  const userIds = [...new Set(plist.map((p) => p.userId).filter((u): u is number => u != null))];
+  const tg = new Map(
+    userIds.length
+      ? (await db.select().from(users).where(inArray(users.id, userIds))).map((u) => [u.id, u])
+      : [],
+  );
+  const enrich = (rows: LeaderboardRow[]): LeaderboardEntry[] =>
+    rows.map((r) => {
+      const u = r.userId != null ? tg.get(r.userId) : undefined;
+      return { ...r, username: u?.username ?? null, photoUrl: u?.photoUrl ?? null };
+    });
   return {
-    chat: { title: chat.title, publicId: chat.publicId },
-    seasons: allSeasons.map((s) => ({ id: s.id, name: s.name, isActive: s.isActive, startsAt: s.startsAt, endsAt: s.endsAt })),
-    season: season ? { id: season.id, name: season.name } : null,
     gamesCount: {
       cash: glist.filter((g) => g.type === "cash").length,
       tournament: glist.filter((g) => g.type === "tournament").length,
     },
-    tournament: computeLeaderboard(lbGames, "tournament"),
-    cash: computeLeaderboard(lbGames, "cash"),
+    tournament: enrich(computeLeaderboard(lbGames, "tournament")),
+    cash: enrich(computeLeaderboard(lbGames, "cash")),
     recent: lbGames.slice(0, 10).map((g) => ({
       id: g.id,
       name: g.name,

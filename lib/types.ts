@@ -72,13 +72,19 @@ export interface MeDTO {
   appUrl: string;
 }
 
+export interface LeaderboardEntryDTO extends LeaderboardRow {
+  username: string | null;
+  photoUrl: string | null;
+}
+
 export interface LeaderboardDTO {
-  chat: { title: string; publicId: string };
+  /** null = the viewer's circle (all their games), not one group. */
+  chat: { title: string; publicId: string } | null;
   seasons: { id: number; name: string; isActive: boolean; startsAt: string; endsAt: string | null }[];
   season: { id: number; name: string } | null;
   gamesCount: { cash: number; tournament: number };
-  tournament: LeaderboardRow[];
-  cash: LeaderboardRow[];
+  tournament: LeaderboardEntryDTO[];
+  cash: LeaderboardEntryDTO[];
   recent: { id: string; name: string; type: string; finishedAt: string | null; winner: string | null }[];
 }
 

@@ -1,6 +1,6 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { chatMembers, chats, users, type User } from "@/lib/db/schema";
+import { chatMembers, chats, games, users, type User } from "@/lib/db/schema";
 import type { TelegramUser } from "@/lib/auth/telegram";
 import { nanoid } from "nanoid";
 
@@ -47,4 +47,13 @@ export async function touchMember(chatId: number, userId: number) {
 export function displayNameOf(u: { firstName: string; lastName?: string | null } | TelegramUser): string {
   if ("first_name" in u) return [u.first_name, u.last_name].filter(Boolean).join(" ").slice(0, 40);
   return [u.firstName, u.lastName].filter(Boolean).join(" ").slice(0, 40);
+}
+
+/** Sets (or clears) the forum topic where the bot posts game news; active games of the chat follow it. */
+export async function setChatTopic(chatId: number, topicId: number | null) {
+  await db.update(chats).set({ topicId }).where(eq(chats.id, chatId));
+  await db
+    .update(games)
+    .set({ topicId })
+    .where(and(eq(games.chatId, chatId), eq(games.status, "active")));
 }

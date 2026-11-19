@@ -28,7 +28,7 @@ import { bustPlace, chipCheck, computeResults, type ResultRow } from "@/lib/game
 import { fmtBuyins, fmtChips, fmtSigned } from "@/lib/format";
 import { miniAppLink } from "@/lib/config";
 import { scheduleJob } from "@/lib/qstash";
-import { escapeHtml, notifyChat, urlButton } from "@/lib/telegram/api";
+import { escapeHtml, notifyChat, urlButton, type ChatTarget } from "@/lib/telegram/api";
 import { AppError, badRequest, forbidden, notFound } from "./errors";
 import { displayNameOf } from "./users";
 
@@ -209,6 +209,11 @@ export async function loadGameState(gameId: string): Promise<GameState> {
 
 // ---------------------------------------------------------------- permissions
 
+/** The group chat (and forum topic) that receives this game's notifications. */
+export function gameTarget(game: Game): ChatTarget {
+  return { chatId: game.chatId, topicId: game.topicId };
+}
+
 export function isHost(game: Game, userId: number | null | undefined) {
   return userId != null && game.hostUserId === userId;
 }
@@ -243,6 +248,8 @@ export interface CreateGameInput {
   chatId?: number | null;
   hostPlays?: boolean;
   playerNames?: string[];
+  /** Forum topic the game was created from (bot); otherwise the group's poker topic is used. */
+  topicId?: number | null;
 }
 
 export async function createGame(actor: User, input: CreateGameInput): Promise<Game> {
@@ -254,6 +261,8 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
       .limit(1);
     if (!m) throw forbidden("Ви не учасник цієї групи");
   }
+  const chatRow =
+    input.chatId != null ? (await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1))[0] : undefined;
   const season =
     input.chatId != null
       ? (
@@ -281,6 +290,7 @@ export async function createGame(actor: User, input: CreateGameInput): Promise<G
       startingStack: input.startingStack,
       blindStructure: structure,
       turnSeconds: input.turnSeconds ?? 30,
+      topicId: input.chatId != null ? (input.topicId ?? chatRow?.topicId ?? null) : null,
     })
     .returning();
 
@@ -471,7 +481,7 @@ export async function bustPlayer(gameId: string, playerId: number, actor: User) 
   if (game.chatId) {
     const left = Number(count) - 1;
     await notifyChat(
-      game.chatId,
+      gameTarget(game),
       `💥 <b>${escapeHtml(player.displayName)}</b> вибуває — ${place}-е місце.` +
         (left === 1 ? "\n🏆 Залишився один гравець — хост може завершити турнір." : ` У грі ще ${left}.`),
     );
@@ -504,7 +514,7 @@ export async function timerAction(gameId: string, actor: User, action: TimerActi
   await scheduleBlindJob(updated);
   if ((action === "next" || action === "prev") && updated.chatId) {
     const v = computeTimer(updated.blindStructure, updated, now);
-    if (v.status === "running") await notifyChat(updated.chatId, levelMessage(updated, v.levelIndex));
+    if (v.status === "running") await notifyChat(gameTarget(updated), levelMessage(updated, v.levelIndex));
   }
   return updated;
 }
@@ -540,7 +550,7 @@ export async function handleBlindJob(body: { gameId: string; version: number; le
   const v = computeTimer(game.blindStructure, game, new Date());
   if (v.status !== "running") return "not-running";
   if (v.levelIndex >= body.level) {
-    await notifyChat(game.chatId, levelMessage(game, v.levelIndex), urlButton("⏱ Таймер", miniAppLink(game.id)));
+    await notifyChat(gameTarget(game), levelMessage(game, v.levelIndex), urlButton("⏱ Таймер", miniAppLink(game.id)));
   }
   await scheduleBlindJob(game);
   return "ok";

@@ -37,6 +37,8 @@ export const chats = pgTable("chats", {
   id: tgId("id").primaryKey(),
   publicId: text("public_id").notNull().unique(),
   title: text("title").notNull(),
+  /** Forum topic (message_thread_id) where the bot posts game news; null = the general chat. */
+  topicId: integer("topic_id"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
@@ -92,6 +94,8 @@ export const games = pgTable(
     /** Legacy: "update your stack" reminders (no longer scheduled). */
     reminderIntervalMin: integer("reminder_interval_min"),
     reminderVersion: integer("reminder_version").notNull().default(0),
+    /** Forum topic of the group chat that receives this game's notifications. */
+    topicId: integer("topic_id"),
     /** 4-digit code to join the game; unique among active games, freed when the game ends. */
     joinCode: text("join_code"),
     createdAt: ts("created_at").notNull().defaultNow(),

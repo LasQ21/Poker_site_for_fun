@@ -161,4 +161,48 @@ d("bot (integration)", () => {
     await bot.handleUpdate(msg(HOST, "/history"));
     expect(lastText()).toContain("Останні ігри");
   });
+
+  it("remembers the poker topic of a forum group", async () => {
+    const FORUM = { id: -100778, type: "supergroup" as const, title: "Forum", is_forum: true };
+    const { db } = await import("@/lib/db");
+    const { chats, games } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(chats).where(eq(chats.id, FORUM.id));
+    const inTopic = (text: string, topic?: number): Update => {
+      const u = msg(HOST, text, FORUM as never);
+      if (topic) Object.assign(u.message!, { message_thread_id: topic, is_topic_message: true });
+      return u;
+    };
+
+    await bot.handleUpdate(inTopic("/topic"));
+    expect(lastText()).toContain("у тій гілці");
+
+    // Starting a game inside the "Poker" topic makes it the group's topic.
+    await bot.handleUpdate(inTopic("/newgame", 42));
+    expect(sent.at(-1)?.payload.message_thread_id).toBe(42);
+    await bot.handleUpdate({
+      update_id: updateId++,
+      callback_query: {
+        id: "cb3",
+        from: HOST,
+        chat_instance: "z",
+        data: "ng:cash",
+        message: { message_id: 9, date: 0, chat: FORUM, text: "Яку гру створити?", message_thread_id: 42, is_topic_message: true } as never,
+      },
+    });
+    expect(lastText()).toContain("писатиме в цю гілку");
+    const [chat] = await db.select().from(chats).where(eq(chats.id, FORUM.id));
+    expect(chat.topicId).toBe(42);
+    const [game] = await db.select().from(games).where(eq(games.chatId, FORUM.id));
+    expect(game.topicId).toBe(42);
+
+    // Moving to another topic moves active games too; /topic off goes back to the general chat.
+    await bot.handleUpdate(inTopic("/topic", 77));
+    expect(lastText()).toContain("Готово");
+    expect((await db.select().from(games).where(eq(games.chatId, FORUM.id)))[0].topicId).toBe(77);
+    await bot.handleUpdate(inTopic("/topic off", 77));
+    expect((await db.select().from(chats).where(eq(chats.id, FORUM.id)))[0].topicId).toBeNull();
+    await db.delete(games).where(eq(games.chatId, FORUM.id));
+    await db.delete(chats).where(eq(chats.id, FORUM.id));
+  });
 });

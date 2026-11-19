@@ -46,8 +46,8 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
     case "end": {
       const state = await G.endGame(id, viewer, a.finalStacks);
       if (state.game.chatId) {
-        await notifyChat(state.game.chatId, G.summaryText(state), urlButton("📊 Підсумок", `${gameWebUrl(id)}/summary`));
-        await sendCsv(state.game.chatId, `${state.game.name.replace(/[^\p{L}\p{N}_-]+/gu, "_")}.csv`, G.gameCsv(state), escapeHtml(state.game.name));
+        await notifyChat(G.gameTarget(state.game), G.summaryText(state), urlButton("📊 Підсумок", `${gameWebUrl(id)}/summary`));
+        await sendCsv(G.gameTarget(state.game), `${state.game.name.replace(/[^\p{L}\p{N}_-]+/gu, "_")}.csv`, G.gameCsv(state), escapeHtml(state.game.name));
       }
       break;
     }

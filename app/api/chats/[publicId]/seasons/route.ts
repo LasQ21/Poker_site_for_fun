@@ -11,7 +11,7 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
   const chat = await chatByPublicId((await params).publicId);
   const { name } = z.object({ name: z.string().min(1).max(60) }).parse(await req.json());
   const season = await startSeason(chat.id, viewer.id, name);
-  await notifyChat(chat.id, `🏁 Стартував новий сезон: <b>${escapeHtml(season.name)}</b>`);
+  await notifyChat({ chatId: chat.id, topicId: chat.topicId }, `🏁 Стартував новий сезон: <b>${escapeHtml(season.name)}</b>`);
   return json({ season });
 });
 

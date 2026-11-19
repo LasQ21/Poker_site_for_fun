@@ -10,10 +10,16 @@ import { AppError } from "@/lib/server/errors";
 import * as G from "@/lib/server/games";
 import { activeSeason, endSeason, loadLeaderboard, startSeason } from "@/lib/server/leaderboard";
 import { loadProfile, type ProfileData } from "@/lib/server/profile";
-import { touchMember, upsertChat, upsertUser } from "@/lib/server/users";
+import { setChatTopic, touchMember, upsertChat, upsertUser } from "@/lib/server/users";
 import { escapeHtml, sendCsv } from "@/lib/telegram/api";
 
 const isGroup = (ctx: Context) => ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
+
+/** Forum topic the update came from (undefined in the general chat or in groups without topics). */
+function topicOf(ctx: Context): number | undefined {
+  const m = ctx.msg as { is_topic_message?: boolean; message_thread_id?: number } | undefined;
+  return m?.is_topic_message ? m.message_thread_id : undefined;
+}
 
 export const PRIVATE_COMMANDS: BotCommand[] = [
   { command: "start", description: "Відкрити покер-трекер" },
@@ -32,6 +38,7 @@ export const GROUP_COMMANDS: BotCommand[] = [
   { command: "standings", description: "Хто за столом і скільки купив" },
   { command: "endgame", description: "Завершити гру (хост)" },
   { command: "stats", description: "Моя статистика в групі" },
+  { command: "topic", description: "Писати про покер у цю гілку" },
   { command: "leaderboard", description: "Лідерборд сезону" },
   { command: "season", description: "Сезон: /season new <назва> | /season end" },
   { command: "history", description: "Останні ігри групи" },
@@ -53,6 +60,7 @@ const HELP = `<b>Покер-трекер</b> — облік стеків у до
 /leaderboard — лідерборд сезону
 /season new Осінь — новий сезон, /season end — завершити
 /history — останні ігри
+/topic — у групі з гілками: напишіть у гілці «Покер», і бот писатиме туди (/topic off — назад у загальний чат)
 
 У застосунку: таймер блайндів, таймер ходу, профілі гравців із графіками.`;
 
@@ -179,16 +187,23 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
     const type = ctx.match![1] as "cash" | "tournament";
     const user = await userFromCtx(ctx);
     const chatId = ctx.chat!.id;
+    const topicId = topicOf(ctx);
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    // The first game started in a topic makes it the group's poker topic.
+    const remembered = topicId != null && chatRow?.topicId == null;
+    if (remembered) await setChatTopic(chatId, topicId);
     const game = await G.createGame(user, {
       type,
       startingStack: 10_000,
       chatId,
       hostPlays: true,
+      topicId,
     });
     await ctx.answerCallbackQuery({ text: "Гру створено!" });
     await ctx.editMessageText(
       `🃏 <b>${escapeHtml(game.name)}</b> створено!\nХост: ${escapeHtml(user.firstName)} · стартовий стек ${fmtChips(game.startingStack)}\n\n` +
-        `Код гри: <b>${game.joinCode}</b>\nСідайте за стіл: /join (тут) або /join ${game.joinCode} (будь-де), чи кнопка нижче.`,
+        `Код гри: <b>${game.joinCode}</b>\nСідайте за стіл: /join (тут) або /join ${game.joinCode} (будь-де), чи кнопка нижче.` +
+        (remembered ? "\n\n📌 Тепер усі повідомлення про ігри бот писатиме в цю гілку." : ""),
       { parse_mode: "HTML", reply_markup: gameButton(game.id) },
     );
   }));
@@ -292,7 +307,7 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard().url("📊 Підсумок", `${gameWebUrl(game.id)}/summary`),
     });
-    await sendCsv(ctx.chat!.id, `game-${game.id}.csv`, G.gameCsv(state), game.name);
+    await sendCsv(G.gameTarget(game), `game-${game.id}.csv`, G.gameCsv(state), game.name);
   }));
 
   bot.command(["stats", "me"], run(async (ctx) => {
@@ -304,6 +319,29 @@ export function createBot(token = config.botToken, botInfo?: UserFromGetMe) {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard().url("📈 Профіль і графіки", `${appUrl()}/${path}`),
     });
+  }));
+
+  bot.command("topic", run(async (ctx) => {
+    if (!isGroup(ctx)) throw new AppError(400, "Команда працює в групі з гілками (темами).");
+    const chatId = ctx.chat!.id;
+    const arg = String(ctx.match ?? "").trim().toLowerCase();
+    if (/^(off|вимк\S*|reset|general)$/.test(arg)) {
+      await setChatTopic(chatId, null);
+      await ctx.reply("Гаразд, повідомлення про ігри знову йдуть у загальний чат групи.");
+      return;
+    }
+    const topicId = topicOf(ctx);
+    if (topicId == null) {
+      const forum = (ctx.chat as { is_forum?: boolean }).is_forum;
+      throw new AppError(
+        400,
+        forum
+          ? "Напишіть /topic у тій гілці, куди бот має писати про покер (наприклад, «Покер»)."
+          : "У цій групі немає гілок. Увімкніть «Теми» в налаштуваннях групи або бот писатиме в загальний чат.",
+      );
+    }
+    await setChatTopic(chatId, topicId);
+    await ctx.reply("📌 Готово! Блайнди, вибування, підсумки й сезони бот тепер пише в цю гілку.\n/topic off — повернути в загальний чат.");
   }));
 
   bot.command("leaderboard", run(async (ctx) => {
